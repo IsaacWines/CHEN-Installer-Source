@@ -1,11 +1,11 @@
 [
   {
-    "name": "MATLAB Batch Installer",
-    "scriptType": "batch",
-    "scriptPath": "batch/matlab_installer.bat",
+    "name": "MATLAB Installer",
+    "scriptType": "powershell",
+    "scriptPath": "powershell/matlab_installer.ps1",
     "arguments": "",
-    "workingDirectory": "batch",
-    "enabled": false
+    "workingDirectory": "powershell",
+    "enabled": true
   },
   {
     "name": "FIJI Installer",

@@ -9,7 +9,8 @@ function Send-GuiProgress {
     if ($Percent -lt 0) { $Percent = 0 }
     if ($Percent -gt 100) { $Percent = 100 }
 
-    Write-Output "CHEN_PROGRESS|$Percent|$Message"
+    [Console]::Out.WriteLine("CHEN_PROGRESS|$Percent|$Message")
+    [Console]::Out.Flush()
 }
 
 function Test-IsAdmin {
