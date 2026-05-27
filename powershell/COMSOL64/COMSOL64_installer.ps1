@@ -589,3 +589,251 @@ function Get-ComsolSettings {
         License     = "$finalPort@$finalServer"
     }
 }
+
+# ==========================
+# setupconfig.ini helpers
+# ==========================
+
+function Set-ConfigValue {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ConfigText,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Key,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Value
+    )
+
+    $escapedKey = [regex]::Escape($Key)
+    $pattern = "(?m)^\s*$escapedKey\s*=.*$"
+    $replacement = "$Key = $Value"
+
+    if ($ConfigText -match $pattern) {
+        return [regex]::Replace($ConfigText, $pattern, $replacement)
+    }
+
+    return $ConfigText.TrimEnd() + "`r`n$replacement`r`n"
+}
+
+function Save-FileFromUrl {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Url,
+
+        [Parameter(Mandatory = $true)]
+        [string]$OutputPath
+    )
+
+    $cmd = Get-Command -Name Invoke-FileDownload -ErrorAction SilentlyContinue
+
+    if ($null -ne $cmd) {
+        try {
+            Invoke-FileDownload -Url $Url -OutputPath $OutputPath
+            return
+        }
+        catch {
+            Write-GuiLog -Message "Invoke-FileDownload failed. Falling back to Invoke-WebRequest." -Level "WARN"
+        }
+    }
+
+    Invoke-WebRequest -Uri $Url -OutFile $OutputPath -UseBasicParsing
+}
+
+function New-ComsolSetupConfig {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object]$Settings,
+
+        [Parameter(Mandatory = $true)]
+        [string]$SetupConfigUrl,
+
+        [Parameter(Mandatory = $true)]
+        [string]$OutputPath
+    )
+
+    if ([string]::IsNullOrWhiteSpace($SetupConfigUrl)) {
+        $SetupConfigUrl = Get-RequiredValue `
+            -CurrentValue "" `
+            -Title "COMSOL SetupConfig URL" `
+            -Prompt "Enter the online setupconfig.ini URL." `
+            -DefaultValue ""
+    }
+
+    Write-GuiLog -Message "Downloading COMSOL setupconfig.ini template." -Percent 25
+
+    Save-FileFromUrl -Url $SetupConfigUrl -OutputPath $script:DownloadedConfigPath
+
+    if (-not (Test-Path -LiteralPath $script:DownloadedConfigPath -PathType Leaf)) {
+        throw "Failed to download setupconfig.ini template."
+    }
+
+    Write-GuiLog -Message "Downloaded setupconfig template." -Percent 35
+
+    $config = Get-Content -LiteralPath $script:DownloadedConfigPath -Raw
+
+    Write-GuiLog -Message "Applying dynamic setupconfig.ini values." -Percent 45
+
+    $config = Set-ConfigValue -ConfigText $config -Key "installdir"  -Value $Settings.InstallDir
+    $config = Set-ConfigValue -ConfigText $config -Key "installmode" -Value $Settings.InstallMode
+    $config = Set-ConfigValue -ConfigText $config -Key "license"     -Value $Settings.License
+    $config = Set-ConfigValue -ConfigText $config -Key "name"        -Value $Settings.Name
+    $config = Set-ConfigValue -ConfigText $config -Key "company"     -Value $Settings.Company
+
+    # Keep terminal output enabled.
+    $config = Set-ConfigValue -ConfigText $config -Key "quiet" -Value "0"
+
+    if ($NoComsolGui) {
+        $config = Set-ConfigValue -ConfigText $config -Key "showgui" -Value "0"
+    }
+    else {
+        $config = Set-ConfigValue -ConfigText $config -Key "showgui" -Value "1"
+    }
+
+    Set-Content -LiteralPath $OutputPath -Value $config -Encoding ASCII
+
+    Write-GuiLog -Message "Final setupconfig.ini created in C:\Temp." -Percent 55
+}
+
+# ==========================
+# Process capture
+# ==========================
+
+function ConvertTo-ProcessArgumentString {
+    param(
+        [string[]]$Arguments
+    )
+
+    $quoted = foreach ($arg in $Arguments) {
+        if ($null -eq $arg) {
+            continue
+        }
+
+        if ($arg -match '^[A-Za-z0-9_\-\.\\/:@=]+$') {
+            $arg
+        }
+        else {
+            '"' + ($arg -replace '"', '\"') + '"'
+        }
+    }
+
+    return ($quoted -join " ")
+}
+
+function Invoke-ProcessWithGuiOutput {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$FilePath,
+
+        [Parameter(Mandatory = $true)]
+        [string[]]$Arguments,
+
+        [Parameter(Mandatory = $true)]
+        [string]$OutputLogPath
+    )
+
+    if (Test-Path -LiteralPath $OutputLogPath -PathType Leaf) {
+        Remove-Item -LiteralPath $OutputLogPath -Force
+    }
+
+    $argString = ConvertTo-ProcessArgumentString -Arguments $Arguments
+
+    Write-GuiLog -Message "Launching COMSOL installer process."
+    Write-GuiLog -Message "Installer output log will be kept."
+
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = $FilePath
+    $psi.Arguments = $argString
+    $psi.UseShellExecute = $false
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    $psi.CreateNoWindow = $true
+
+    $process = New-Object System.Diagnostics.Process
+    $process.StartInfo = $psi
+    $process.EnableRaisingEvents = $true
+
+    $process.add_OutputDataReceived({
+        param($sender, $eventArgs)
+
+        if ($null -ne $eventArgs.Data -and $eventArgs.Data.Trim() -ne "") {
+            $line = "[COMSOL STDOUT] $($eventArgs.Data)"
+
+            [Console]::Out.WriteLine($line)
+            [Console]::Out.Flush()
+
+            Add-Content -Path $script:InstallerOutputLogPath -Value $line
+            Add-Content -Path $script:WrapperLogPath -Value $line
+        }
+    })
+
+    $process.add_ErrorDataReceived({
+        param($sender, $eventArgs)
+
+        if ($null -ne $eventArgs.Data -and $eventArgs.Data.Trim() -ne "") {
+            $line = "[COMSOL STDERR] $($eventArgs.Data)"
+
+            [Console]::Out.WriteLine($line)
+            [Console]::Out.Flush()
+
+            Add-Content -Path $script:InstallerOutputLogPath -Value $line
+            Add-Content -Path $script:WrapperLogPath -Value $line
+        }
+    })
+
+    [void]$process.Start()
+
+    $process.BeginOutputReadLine()
+    $process.BeginErrorReadLine()
+
+    Write-GuiLog -Message "COMSOL installer is running." -Percent 65
+
+    $lastProgressTime = Get-Date
+
+    while (-not $process.HasExited) {
+        Start-Sleep -Seconds 2
+
+        $now = Get-Date
+        if (($now - $lastProgressTime).TotalSeconds -ge 20) {
+            Write-GuiLog -Message "COMSOL installer still running." -Percent 70
+            $lastProgressTime = $now
+        }
+    }
+
+    $process.WaitForExit()
+
+    Start-Sleep -Milliseconds 500
+
+    $exitCode = $process.ExitCode
+    $process.Dispose()
+
+    return $exitCode
+}
+
+function Handle-ComsolExitCode {
+    param(
+        [int]$ExitCode
+    )
+
+    switch ($ExitCode) {
+        0 {
+            Write-GuiLog -Message "COMSOL installation completed successfully." -Percent 100
+        }
+        1 {
+            Write-GuiLog -Message "COMSOL completed with at least one warning. Check logs." -Percent 100 -Level "WARN"
+        }
+        2 {
+            throw "COMSOL completed with at least one error. Exit code 2."
+        }
+        3 {
+            throw "COMSOL completed with at least one fatal error. Exit code 3."
+        }
+        4 {
+            throw "COMSOL installer exited before installation completed. Exit code 4."
+        }
+        default {
+            throw "COMSOL installer failed with unexpected exit code $ExitCode."
+        }
+    }
+}
