@@ -106,3 +106,21 @@ function Expand-ZipToFolder {
 
     Expand-Archive -Path $ZipPath -DestinationPath $DestinationPath -Force
 }
+
+function Get-GuiNetworkRoot {
+    param(
+        [string]$NetworkRootParameter = ""
+    )
+
+    # GUI provides the root through CHEN_NETWORK_ROOT.
+    if (-not [string]::IsNullOrWhiteSpace($env:CHEN_NETWORK_ROOT)) {
+        return Normalize-NetworkRoot -NetworkRoot $env:CHEN_NETWORK_ROOT
+    }
+
+    # Optional fallback for manual command-line testing.
+    if (-not [string]::IsNullOrWhiteSpace($NetworkRootParameter)) {
+        return Normalize-NetworkRoot -NetworkRoot $NetworkRootParameter
+    }
+
+    return ""
+}

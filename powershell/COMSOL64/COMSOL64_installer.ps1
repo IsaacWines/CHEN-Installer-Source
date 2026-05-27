@@ -9,7 +9,7 @@
 
 param(
 
-  # GUI Network Root 
+  # Optional Netowrk Override Path
   [string]$NetworkRoot = "",
 
   # Optional Manual Override
@@ -25,7 +25,7 @@ param(
   [string]$InstallDirectory = "C:\Program Files\COMSOL\COMSOL64\Multiphysics",
 
   # Values From GUI Prompts 
-  [string]$InstallMode = "install",
+  [string]$InstallMode = "",
   [string]$LicensePort = "",
   [string]$LicenseServer = "",
   [string]$ComsolUserName = "",
@@ -278,7 +278,6 @@ function Write-GuiLog {
         [string]$Level = "INFO"
     )
 
-    # GUI/terminal output should not include timestamp because the GUI already adds one.
     if ($Level -eq "INFO") {
         $displayLine = $Message
     }
@@ -286,12 +285,8 @@ function Write-GuiLog {
         $displayLine = "[$Level] $Message"
     }
 
-    # File log keeps timestamp for troubleshooting.
     $stamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
     $fileLine = "$stamp [$Level] $Message"
-
-    [Console]::Out.WriteLine($displayLine)
-    [Console]::Out.Flush()
 
     try {
         Add-Content -Path $script:WrapperLogPath -Value $fileLine
@@ -301,7 +296,14 @@ function Write-GuiLog {
     }
 
     if ($Percent -ge 0) {
-        Send-ProgressSafe -Percent $Percent -Message $Message
+        # Only send progress message.
+        # Do NOT also write displayLine to stdout, because the GUI logs progress messages.
+        Send-ProgressSafe -Percent $Percent -Message $displayLine
+    }
+    else {
+        # Only normal non-progress lines go directly to GUI terminal.
+        [Console]::Out.WriteLine($displayLine)
+        [Console]::Out.Flush()
     }
 }
 
@@ -384,25 +386,25 @@ function Resolve-ComsolInstallerPath {
             return (Resolve-Path -LiteralPath $ManualInstallerPath).Path
         }
 
-        Write-GuiLog -Message "Manual installer path was not a valid COMSOL setup.exe. Falling back to NetworkRoot/file picker." -Level "WARN"
+        Write-GuiLog -Message "Manual installer path was not a valid setup.exe. Falling back to GUI network root/file picker." -Level "WARN"
     }
 
-    $normalizedRoot = Normalize-NetworkRoot -NetworkRoot $NetworkRoot
+    $normalizedRoot = Get-GuiNetworkRoot
 
     if (-not [string]::IsNullOrWhiteSpace($normalizedRoot)) {
         $candidatePath = Join-Path -Path $normalizedRoot -ChildPath $script:COMSOL64NetworkRelativePath
 
-        Write-GuiLog -Message "Checking COMSOL installer path from NetworkRoot."
+        Write-GuiLog -Message "Checking COMSOL installer path from GUI network root."
 
         if (Test-ComsolSetupExe -Path $candidatePath) {
-            Write-GuiLog -Message "Found COMSOL installer from NetworkRoot."
+            Write-GuiLog -Message "Found COMSOL setup.exe from GUI network root."
             return (Resolve-Path -LiteralPath $candidatePath).Path
         }
 
-        Write-GuiLog -Message "NetworkRoot did not lead to a valid COMSOL setup.exe." -Level "WARN"
+        Write-GuiLog -Message "GUI network root did not lead to the expected COMSOL setup.exe." -Level "WARN"
     }
     else {
-        Write-GuiLog -Message "No NetworkRoot was provided." -Level "WARN"
+        Write-GuiLog -Message "No GUI network root value was received." -Level "WARN"
     }
 
     Write-GuiLog -Message "Opening file picker for COMSOL setup.exe." -Percent 5
@@ -421,10 +423,10 @@ function Resolve-ComsolInstallerPath {
     Write-GuiLog -Message "User selected an installer path."
 
     if (-not (Test-ComsolSetupExe -Path $selectedPath)) {
-        throw "Selected file is not a valid setup.exe."
+        throw "Selected file must be named setup.exe."
     }
 
-    Write-GuiLog -Message "Selected COMSOL setup.exe verified."
+    Write-GuiLog -Message "Selected setup.exe verified."
     return (Resolve-Path -LiteralPath $selectedPath).Path
 }
 
@@ -860,7 +862,6 @@ try {
     }
 
     $resolvedInstallerPath = Resolve-ComsolInstallerPath `
-        -NetworkRoot $NetworkRoot `
         -ManualInstallerPath $InstallerPath
 
     Write-GuiLog -Message "COMSOL installer resolved." -Percent 8
