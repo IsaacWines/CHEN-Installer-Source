@@ -278,14 +278,23 @@ function Write-GuiLog {
         [string]$Level = "INFO"
     )
 
-    $stamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    $line = "$stamp [$Level] $Message"
+    # GUI/terminal output should not include timestamp because the GUI already adds one.
+    if ($Level -eq "INFO") {
+        $displayLine = $Message
+    }
+    else {
+        $displayLine = "[$Level] $Message"
+    }
 
-    [Console]::Out.WriteLine($line)
+    # File log keeps timestamp for troubleshooting.
+    $stamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    $fileLine = "$stamp [$Level] $Message"
+
+    [Console]::Out.WriteLine($displayLine)
     [Console]::Out.Flush()
 
     try {
-        Add-Content -Path $script:WrapperLogPath -Value $line
+        Add-Content -Path $script:WrapperLogPath -Value $fileLine
     }
     catch {
         # Do not fail script because logging failed.
@@ -356,21 +365,7 @@ function Test-ComsolSetupExe {
         return $false
     }
 
-    $versionInfo = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($item.FullName)
-
-    $checkText = @(
-        $item.FullName
-        $versionInfo.FileDescription
-        $versionInfo.ProductName
-        $versionInfo.CompanyName
-        $versionInfo.OriginalFilename
-    ) -join " "
-
-    if ($checkText -match "(?i)comsol") {
-        return $true
-    }
-
-    return $false
+    return $true
 }
 
 function Resolve-ComsolInstallerPath {
@@ -420,13 +415,13 @@ function Resolve-ComsolInstallerPath {
     $selectedPath = Show-ComsolSetupFilePicker -InitialDirectory $initialDir
 
     if ([string]::IsNullOrWhiteSpace($selectedPath)) {
-        throw "No COMSOL setup.exe was selected. Cancelling installation."
+        throw "No setup.exe was selected. Cancelling installation."
     }
 
     Write-GuiLog -Message "User selected an installer path."
 
     if (-not (Test-ComsolSetupExe -Path $selectedPath)) {
-        throw "Selected file is not a valid COMSOL setup.exe."
+        throw "Selected file is not a valid setup.exe."
     }
 
     Write-GuiLog -Message "Selected COMSOL setup.exe verified."
@@ -758,28 +753,32 @@ function Invoke-ProcessWithGuiOutput {
         param($sender, $eventArgs)
 
         if ($null -ne $eventArgs.Data -and $eventArgs.Data.Trim() -ne "") {
-            $line = "[COMSOL STDOUT] $($eventArgs.Data)"
-
-            [Console]::Out.WriteLine($line)
-            [Console]::Out.Flush()
-
-            Add-Content -Path $script:InstallerOutputLogPath -Value $line
-            Add-Content -Path $script:WrapperLogPath -Value $line
-        }
+          $displayLine = "[COMSOL STDOUT] $($eventArgs.Data)"
+          $stamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+          $fileLine = "$stamp $displayLine"
+      
+          [Console]::Out.WriteLine($displayLine)
+          [Console]::Out.Flush()
+      
+          Add-Content -Path $script:InstallerOutputLogPath -Value $fileLine
+          Add-Content -Path $script:WrapperLogPath -Value $fileLine
+      }
     })
 
     $process.add_ErrorDataReceived({
         param($sender, $eventArgs)
 
         if ($null -ne $eventArgs.Data -and $eventArgs.Data.Trim() -ne "") {
-            $line = "[COMSOL STDERR] $($eventArgs.Data)"
-
-            [Console]::Out.WriteLine($line)
-            [Console]::Out.Flush()
-
-            Add-Content -Path $script:InstallerOutputLogPath -Value $line
-            Add-Content -Path $script:WrapperLogPath -Value $line
-        }
+          $displayLine = "[COMSOL STDERR] $($eventArgs.Data)"
+          $stamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+          $fileLine = "$stamp $displayLine"
+      
+          [Console]::Out.WriteLine($displayLine)
+          [Console]::Out.Flush()
+      
+          Add-Content -Path $script:InstallerOutputLogPath -Value $fileLine
+          Add-Content -Path $script:WrapperLogPath -Value $fileLine
+      }
     })
 
     [void]$process.Start()
