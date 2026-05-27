@@ -432,3 +432,160 @@ function Resolve-ComsolInstallerPath {
     Write-GuiLog -Message "Selected COMSOL setup.exe verified."
     return (Resolve-Path -LiteralPath $selectedPath).Path
 }
+
+# ==========================
+# Prompt / validation helpers
+# ==========================
+
+function Get-RequiredValue {
+    param(
+        [string]$CurrentValue,
+        [string]$Prompt,
+        [string]$Title,
+        [string]$DefaultValue = ""
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($CurrentValue)) {
+        return $CurrentValue.Trim()
+    }
+
+    while ($true) {
+        $value = Show-InputBox -Prompt $Prompt -Title $Title -DefaultValue $DefaultValue
+
+        if (-not [string]::IsNullOrWhiteSpace($value)) {
+            return $value.Trim()
+        }
+
+        $retry = Show-YesNoPrompt -Title "Required Value" -Message "This value is required. Do you want to try again?"
+
+        if (-not $retry) {
+            throw "Required value was cancelled: $Title"
+        }
+    }
+}
+
+function Get-InstallMode {
+    param(
+        [string]$CurrentValue
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($CurrentValue)) {
+        $clean = $CurrentValue.Trim().ToLower()
+
+        if ($clean -in @("install", "uninstall")) {
+            return $clean
+        }
+
+        throw "Invalid install mode passed from GUI. Must be install or uninstall."
+    }
+
+    while ($true) {
+        $value = Show-InputBox `
+            -Title "COMSOL Install Mode" `
+            -Prompt "Enter install mode. Valid options are: install or uninstall." `
+            -DefaultValue ""
+
+        $value = $value.Trim().ToLower()
+
+        if ($value -in @("install", "uninstall")) {
+            return $value
+        }
+
+        $retry = Show-YesNoPrompt `
+            -Title "Invalid Install Mode" `
+            -Message "Install mode must be either install or uninstall. Do you want to try again?"
+
+        if (-not $retry) {
+            throw "Invalid install mode cancelled by user."
+        }
+    }
+}
+
+function Get-LicensePort {
+    param(
+        [string]$CurrentValue
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($CurrentValue)) {
+        $clean = $CurrentValue.Trim()
+
+        $port = 0
+        $valid = [int]::TryParse($clean, [ref]$port)
+
+        if ($valid -and $port -ge 1 -and $port -le 65535) {
+            return $clean
+        }
+
+        throw "Invalid license port passed from GUI. Must be a number from 1 to 65535."
+    }
+
+    while ($true) {
+        $raw = Show-InputBox `
+            -Title "COMSOL License Port" `
+            -Prompt "Enter the COMSOL license server port." `
+            -DefaultValue ""
+
+        $raw = $raw.Trim()
+
+        $port = 0
+        $valid = [int]::TryParse($raw, [ref]$port)
+
+        if ($valid -and $port -ge 1 -and $port -le 65535) {
+            return $raw
+        }
+
+        $retry = Show-YesNoPrompt `
+            -Title "Invalid Port" `
+            -Message "The port must be a number from 1 to 65535. Do you want to try again?"
+
+        if (-not $retry) {
+            throw "Invalid port cancelled by user."
+        }
+    }
+}
+
+function Get-ComsolSettings {
+    Write-GuiLog -Message "Collecting COMSOL setup values." -Percent 10
+
+    $finalInstallDir = Get-RequiredValue `
+        -CurrentValue $InstallDirectory `
+        -Title "COMSOL Install Directory" `
+        -Prompt "Enter the COMSOL install directory. For uninstall, this should be the existing COMSOL installation directory." `
+        -DefaultValue "C:\Program Files\COMSOL\COMSOL64\Multiphysics"
+
+    $finalInstallMode = Get-InstallMode -CurrentValue $InstallMode
+
+    if ($finalInstallMode -eq "uninstall" -and -not (Test-Path -LiteralPath $finalInstallDir -PathType Container)) {
+        throw "Install directory does not exist for uninstall mode."
+    }
+
+    $finalPort = Get-LicensePort -CurrentValue $LicensePort
+
+    $finalServer = Get-RequiredValue `
+        -CurrentValue $LicenseServer `
+        -Title "COMSOL License Server" `
+        -Prompt "Enter the COMSOL license server hostname." `
+        -DefaultValue ""
+
+    $finalName = Get-RequiredValue `
+        -CurrentValue $ComsolUserName `
+        -Title "COMSOL User Name" `
+        -Prompt "Enter the name of the person using COMSOL." `
+        -DefaultValue ""
+
+    $finalCompany = Get-RequiredValue `
+        -CurrentValue $CompanyName `
+        -Title "COMSOL Company / Organization" `
+        -Prompt "Enter the company or organization name." `
+        -DefaultValue ""
+
+    return [pscustomobject]@{
+        InstallDir  = $finalInstallDir
+        InstallMode = $finalInstallMode
+        Port        = $finalPort
+        Server      = $finalServer
+        Name        = $finalName
+        Company     = $finalCompany
+        License     = "$finalPort@$finalServer"
+    }
+}
