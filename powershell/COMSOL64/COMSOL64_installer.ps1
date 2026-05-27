@@ -837,3 +837,97 @@ function Handle-ComsolExitCode {
         }
     }
 }
+
+# ==========================
+# Main
+# ==========================
+
+try {
+    New-Item -ItemType Directory -Path $script:TempDir -Force | Out-Null
+
+    if (Test-Path -LiteralPath $script:WrapperLogPath -PathType Leaf) {
+        Remove-Item -LiteralPath $script:WrapperLogPath -Force
+    }
+
+    Write-GuiLog -Message "Starting CHEN COMSOL 6.4 installer wrapper." -Percent 1
+
+    $apartment = [System.Threading.Thread]::CurrentThread.GetApartmentState()
+    if ($apartment -ne "STA") {
+        Write-GuiLog -Message "PowerShell is not running in STA mode. Dialogs may behave incorrectly." -Level "WARN"
+    }
+
+    if (-not (Test-CurrentProcessIsAdmin)) {
+        Write-GuiLog -Message "PowerShell is not running as Administrator. COMSOL may fail if system-level changes are required." -Percent 2 -Level "WARN"
+    }
+
+    $resolvedInstallerPath = Resolve-ComsolInstallerPath `
+        -NetworkRoot $NetworkRoot `
+        -ManualInstallerPath $InstallerPath
+
+    Write-GuiLog -Message "COMSOL installer resolved." -Percent 8
+
+    $settings = Get-ComsolSettings
+
+    Write-GuiLog -Message "COMSOL setup values received. Sensitive values will not be logged."
+
+    New-ComsolSetupConfig `
+        -Settings $settings `
+        -SetupConfigUrl $SetupConfigUrl `
+        -OutputPath $script:FinalConfigPath
+
+    if (-not $NoConfirm) {
+        $message = @"
+COMSOL installer is ready to run.
+
+Temporary setupconfig.ini was generated in C:\Temp.
+Sensitive values are not displayed here.
+
+Run installer now?
+"@
+
+        $confirmed = Show-YesNoPrompt -Title "Run COMSOL Installer" -Message $message
+
+        if (-not $confirmed) {
+            throw "User cancelled before running COMSOL installer."
+        }
+    }
+
+    Write-GuiLog -Message "Launching COMSOL installer." -Percent 60
+
+    $exitCode = Invoke-ProcessWithGuiOutput `
+        -FilePath $resolvedInstallerPath `
+        -Arguments @("-s", $script:FinalConfigPath) `
+        -OutputLogPath $script:InstallerOutputLogPath
+
+    Write-GuiLog -Message "COMSOL installer exited with code $exitCode." -Percent 90
+
+    Handle-ComsolExitCode -ExitCode $exitCode
+}
+catch {
+    $errorMessage = "ERROR: $($_.Exception.Message)"
+    Write-GuiLog -Message $errorMessage -Percent 100 -Level "ERROR"
+
+    try {
+        Show-ErrorPrompt -Message $errorMessage
+    }
+    catch {
+        # Terminal/log output already has the error.
+    }
+
+    exit 1
+}
+finally {
+    Write-GuiLog -Message "Cleaning up temporary setupconfig files."
+
+    if (Test-Path -LiteralPath $script:DownloadedConfigPath -PathType Leaf) {
+        Remove-Item -LiteralPath $script:DownloadedConfigPath -Force
+    }
+
+    if (Test-Path -LiteralPath $script:FinalConfigPath -PathType Leaf) {
+        Remove-Item -LiteralPath $script:FinalConfigPath -Force
+    }
+
+    Write-GuiLog -Message "Deleted temporary setupconfig files from C:\Temp."
+    Write-GuiLog -Message "Wrapper log kept at: $script:WrapperLogPath"
+    Write-GuiLog -Message "Installer output log kept at: $script:InstallerOutputLogPath"
+}
