@@ -241,3 +241,194 @@ function Show-ComsolSetupFilePicker {
 
     return $dialog.FileName
 }
+
+# ==========================
+# Logging / GUI progress
+# ==========================
+
+function Send-ProgressSafe {
+    param(
+        [int]$Percent,
+        [string]$Message
+    )
+
+    $cmd = Get-Command -Name Send-GuiProgress -ErrorAction SilentlyContinue
+
+    if ($null -ne $cmd) {
+        try {
+            Send-GuiProgress -Percent $Percent -Message $Message
+            return
+        }
+        catch {
+            # Fall through to plain progress format.
+        }
+    }
+
+    [Console]::Out.WriteLine("CHEN_PROGRESS|$Percent|$Message")
+    [Console]::Out.Flush()
+}
+
+function Write-GuiLog {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Message,
+
+        [int]$Percent = -1,
+
+        [string]$Level = "INFO"
+    )
+
+    $stamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    $line = "$stamp [$Level] $Message"
+
+    [Console]::Out.WriteLine($line)
+    [Console]::Out.Flush()
+
+    try {
+        Add-Content -Path $script:WrapperLogPath -Value $line
+    }
+    catch {
+        # Do not fail script because logging failed.
+    }
+
+    if ($Percent -ge 0) {
+        Send-ProgressSafe -Percent $Percent -Message $Message
+    }
+}
+
+function Test-CurrentProcessIsAdmin {
+    $cmd = Get-Command -Name Test-IsAdmin -ErrorAction SilentlyContinue
+
+    if ($null -ne $cmd) {
+        try {
+            return [bool](Test-IsAdmin)
+        }
+        catch {
+            Write-GuiLog -Message "Test-IsAdmin from common.ps1 failed; using fallback admin check." -Level "WARN"
+        }
+    }
+
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = New-Object Security.Principal.WindowsPrincipal($identity)
+    return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+# ==========================
+# Path helpers
+# ==========================
+
+function Normalize-NetworkRoot {
+    param(
+        [string]$NetworkRoot
+    )
+
+    if ([string]::IsNullOrWhiteSpace($NetworkRoot)) {
+        return ""
+    }
+
+    $cleanRoot = $NetworkRoot.Trim().Replace("/", "\")
+    $cleanRoot = $cleanRoot -replace "[\\\/]+$", ""
+
+    if (-not $cleanRoot.StartsWith("\\")) {
+        $cleanRoot = "\\" + ($cleanRoot -replace "^[\\\/]+", "")
+    }
+
+    return $cleanRoot
+}
+
+function Test-ComsolSetupExe {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        return $false
+    }
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        return $false
+    }
+
+    $item = Get-Item -LiteralPath $Path
+
+    if ($item.Name -ne "setup.exe") {
+        return $false
+    }
+
+    $versionInfo = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($item.FullName)
+
+    $checkText = @(
+        $item.FullName
+        $versionInfo.FileDescription
+        $versionInfo.ProductName
+        $versionInfo.CompanyName
+        $versionInfo.OriginalFilename
+    ) -join " "
+
+    if ($checkText -match "(?i)comsol") {
+        return $true
+    }
+
+    return $false
+}
+
+function Resolve-ComsolInstallerPath {
+    param(
+        [string]$NetworkRoot,
+        [string]$ManualInstallerPath = ""
+    )
+
+    Write-GuiLog -Message "Resolving COMSOL 6.4 installer path." -Percent 3
+
+    if (-not [string]::IsNullOrWhiteSpace($ManualInstallerPath)) {
+        Write-GuiLog -Message "Manual installer path was provided."
+
+        if (Test-ComsolSetupExe -Path $ManualInstallerPath) {
+            Write-GuiLog -Message "Manual installer path verified."
+            return (Resolve-Path -LiteralPath $ManualInstallerPath).Path
+        }
+
+        Write-GuiLog -Message "Manual installer path was not a valid COMSOL setup.exe. Falling back to NetworkRoot/file picker." -Level "WARN"
+    }
+
+    $normalizedRoot = Normalize-NetworkRoot -NetworkRoot $NetworkRoot
+
+    if (-not [string]::IsNullOrWhiteSpace($normalizedRoot)) {
+        $candidatePath = Join-Path -Path $normalizedRoot -ChildPath $script:COMSOL64NetworkRelativePath
+
+        Write-GuiLog -Message "Checking COMSOL installer path from NetworkRoot."
+
+        if (Test-ComsolSetupExe -Path $candidatePath) {
+            Write-GuiLog -Message "Found COMSOL installer from NetworkRoot."
+            return (Resolve-Path -LiteralPath $candidatePath).Path
+        }
+
+        Write-GuiLog -Message "NetworkRoot did not lead to a valid COMSOL setup.exe." -Level "WARN"
+    }
+    else {
+        Write-GuiLog -Message "No NetworkRoot was provided." -Level "WARN"
+    }
+
+    Write-GuiLog -Message "Opening file picker for COMSOL setup.exe." -Percent 5
+
+    $initialDir = ""
+    if (-not [string]::IsNullOrWhiteSpace($normalizedRoot) -and (Test-Path -Path $normalizedRoot -PathType Container)) {
+        $initialDir = $normalizedRoot
+    }
+
+    $selectedPath = Show-ComsolSetupFilePicker -InitialDirectory $initialDir
+
+    if ([string]::IsNullOrWhiteSpace($selectedPath)) {
+        throw "No COMSOL setup.exe was selected. Cancelling installation."
+    }
+
+    Write-GuiLog -Message "User selected an installer path."
+
+    if (-not (Test-ComsolSetupExe -Path $selectedPath)) {
+        throw "Selected file is not a valid COMSOL setup.exe."
+    }
+
+    Write-GuiLog -Message "Selected COMSOL setup.exe verified."
+    return (Resolve-Path -LiteralPath $selectedPath).Path
+}
