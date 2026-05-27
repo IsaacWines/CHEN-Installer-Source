@@ -19,5 +19,12 @@
     "scriptPath": "powershell/fiji_uninstaller.ps1",
     "arguments": "",
     "enabled": true
+  },
+  {
+    "name": "COMSOL 6.4 Un/Installer",
+    "scriptType": "powershell",
+    "scriptPath": "powershell/COMSOL64/COMSOL64_installer.ps1",
+    "arguments": "",
+    "enabled": true
   }
 ]
