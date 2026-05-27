@@ -38,6 +38,8 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+$script:FinalExitCode = 0
+
 $script:COMSOL64NetworkRelativePath = "Support\Software\Comsol Multiphysics\Software\Comsol 6.4\378\setup.exe"
 
 $script:TempDir = "C:\Temp"
@@ -322,6 +324,25 @@ function Test-CurrentProcessIsAdmin {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     $principal = New-Object Security.Principal.WindowsPrincipal($identity)
     return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+function Remove-ComsolTempFiles {
+    $filesToDelete = @(
+        $script:DownloadedConfigPath,
+        $script:FinalConfigPath
+    )
+
+    foreach ($file in $filesToDelete) {
+        try {
+            if (-not [string]::IsNullOrWhiteSpace($file) -and (Test-Path -LiteralPath $file -PathType Leaf)) {
+                Remove-Item -LiteralPath $file -Force -ErrorAction Stop
+                Write-GuiLog -Message "Deleted temporary file: $file"
+            }
+        }
+        catch {
+            Write-GuiLog -Message "Failed to delete temporary file: $file. Error: $($_.Exception.Message)" -Level "WARN"
+        }
+    }
 }
 
 # ==========================
@@ -817,6 +838,8 @@ function Handle-ComsolExitCode {
         [int]$ExitCode
     )
 
+    $script:FinalExitCode = $ExitCode
+
     switch ($ExitCode) {
         0 {
             Write-GuiLog -Message "COMSOL installation completed successfully." -Percent 100
@@ -825,16 +848,16 @@ function Handle-ComsolExitCode {
             Write-GuiLog -Message "COMSOL completed with at least one warning. Check logs." -Percent 100 -Level "WARN"
         }
         2 {
-            throw "COMSOL completed with at least one error. Exit code 2."
+            Write-GuiLog -Message "COMSOL completed with at least one error. Exit code 2." -Percent 100 -Level "ERROR"
         }
         3 {
-            throw "COMSOL completed with at least one fatal error. Exit code 3."
+            Write-GuiLog -Message "COMSOL completed with at least one fatal error. Exit code 3." -Percent 100 -Level "ERROR"
         }
         4 {
-            throw "COMSOL installer exited before installation completed. Exit code 4."
+            Write-GuiLog -Message "COMSOL installer exited before installation completed. Exit code 4." -Percent 100 -Level "ERROR"
         }
         default {
-            throw "COMSOL installer failed with unexpected exit code $ExitCode."
+            Write-GuiLog -Message "COMSOL installer failed with unexpected exit code $ExitCode." -Percent 100 -Level "ERROR"
         }
     }
 }
@@ -888,6 +911,7 @@ Run installer now?
         $confirmed = Show-YesNoPrompt -Title "Run COMSOL Installer" -Message $message
 
         if (-not $confirmed) {
+            $script:FinalExitCode = 1
             throw "User cancelled before running COMSOL installer."
         }
     }
@@ -904,6 +928,10 @@ Run installer now?
     Handle-ComsolExitCode -ExitCode $exitCode
 }
 catch {
+    if ($script:FinalExitCode -eq 0) {
+        $script:FinalExitCode = 1
+    }
+
     $errorMessage = "ERROR: $($_.Exception.Message)"
     Write-GuiLog -Message $errorMessage -Percent 100 -Level "ERROR"
 
@@ -913,21 +941,15 @@ catch {
     catch {
         # Terminal/log output already has the error.
     }
-
-    exit 1
 }
 finally {
     Write-GuiLog -Message "Cleaning up temporary setupconfig files."
 
-    if (Test-Path -LiteralPath $script:DownloadedConfigPath -PathType Leaf) {
-        Remove-Item -LiteralPath $script:DownloadedConfigPath -Force
-    }
+    Remove-ComsolTempFiles
 
-    if (Test-Path -LiteralPath $script:FinalConfigPath -PathType Leaf) {
-        Remove-Item -LiteralPath $script:FinalConfigPath -Force
-    }
-
-    Write-GuiLog -Message "Deleted temporary setupconfig files from C:\Temp."
+    Write-GuiLog -Message "Cleanup finished."
     Write-GuiLog -Message "Wrapper log kept at: $script:WrapperLogPath"
     Write-GuiLog -Message "Installer output log kept at: $script:InstallerOutputLogPath"
 }
+
+exit $script:FinalExitCode
