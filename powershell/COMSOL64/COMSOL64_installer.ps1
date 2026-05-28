@@ -755,14 +755,46 @@ function Invoke-ProcessWithGuiOutput {
         Remove-Item -LiteralPath $OutputLogPath -Force
     }
 
-    $argString = ConvertTo-ProcessArgumentString -Arguments $Arguments
+    if (-not (Test-Path -LiteralPath $FilePath -PathType Leaf)) {
+        throw "setup.exe could not be found before launch."
+    }
+
+    $setupExeName = Split-Path -Path $FilePath -Leaf
+    $setupRoot = Split-Path -Path $FilePath -Parent
+
+    if ($setupExeName -ne "setup.exe") {
+        throw "Installer file must be named setup.exe."
+    }
+
+    if (-not (Test-Path -LiteralPath (Join-Path $setupRoot "setup.exe") -PathType Leaf)) {
+        throw "setup.exe could not be found in resolved installer root."
+    }
+
+    $setupConfigPath = $Arguments[1]
+
+    if ([string]::IsNullOrWhiteSpace($setupConfigPath) -or -not (Test-Path -LiteralPath $setupConfigPath -PathType Leaf)) {
+        throw "setupconfig.ini could not be found before launch."
+    }
 
     Write-GuiLog -Message "Launching COMSOL installer process."
+    Write-GuiLog -Message "Running setup.exe from installer root."
     Write-GuiLog -Message "Installer output log will be kept."
 
+    # This intentionally mimics:
+    #   cd "<setup root>"
+    #   .\setup.exe -s "C:\Temp\setupconfig.ini"
+    #
+    # Use -LiteralPath so paths with spaces are safe.
+    $command = @"
+Set-Location -LiteralPath '$($setupRoot.Replace("'", "''"))'
+.\setup.exe -s '$($setupConfigPath.Replace("'", "''"))'
+exit `$LASTEXITCODE
+"@
+
     $psi = New-Object System.Diagnostics.ProcessStartInfo
-    $psi.FileName = $FilePath
-    $psi.Arguments = $argString
+    $psi.FileName = "powershell.exe"
+    $psi.Arguments = "-NoProfile -ExecutionPolicy Bypass -Command $([Management.Automation.Language.CodeGeneration]::QuoteArgument($command))"
+    $psi.WorkingDirectory = $setupRoot
     $psi.UseShellExecute = $false
     $psi.RedirectStandardOutput = $true
     $psi.RedirectStandardError = $true
@@ -776,32 +808,32 @@ function Invoke-ProcessWithGuiOutput {
         param($sender, $eventArgs)
 
         if ($null -ne $eventArgs.Data -and $eventArgs.Data.Trim() -ne "") {
-          $displayLine = "[COMSOL STDOUT] $($eventArgs.Data)"
-          $stamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-          $fileLine = "$stamp $displayLine"
-      
-          [Console]::Out.WriteLine($displayLine)
-          [Console]::Out.Flush()
-      
-          Add-Content -Path $script:InstallerOutputLogPath -Value $fileLine
-          Add-Content -Path $script:WrapperLogPath -Value $fileLine
-      }
+            $displayLine = "[COMSOL STDOUT] $($eventArgs.Data)"
+            $stamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+            $fileLine = "$stamp $displayLine"
+
+            [Console]::Out.WriteLine($displayLine)
+            [Console]::Out.Flush()
+
+            Add-Content -Path $script:InstallerOutputLogPath -Value $fileLine
+            Add-Content -Path $script:WrapperLogPath -Value $fileLine
+        }
     })
 
     $process.add_ErrorDataReceived({
         param($sender, $eventArgs)
 
         if ($null -ne $eventArgs.Data -and $eventArgs.Data.Trim() -ne "") {
-          $displayLine = "[COMSOL STDERR] $($eventArgs.Data)"
-          $stamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-          $fileLine = "$stamp $displayLine"
-      
-          [Console]::Out.WriteLine($displayLine)
-          [Console]::Out.Flush()
-      
-          Add-Content -Path $script:InstallerOutputLogPath -Value $fileLine
-          Add-Content -Path $script:WrapperLogPath -Value $fileLine
-      }
+            $displayLine = "[COMSOL STDERR] $($eventArgs.Data)"
+            $stamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+            $fileLine = "$stamp $displayLine"
+
+            [Console]::Out.WriteLine($displayLine)
+            [Console]::Out.Flush()
+
+            Add-Content -Path $script:InstallerOutputLogPath -Value $fileLine
+            Add-Content -Path $script:WrapperLogPath -Value $fileLine
+        }
     })
 
     [void]$process.Start()
