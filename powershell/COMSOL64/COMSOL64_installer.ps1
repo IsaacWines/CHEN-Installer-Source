@@ -698,6 +698,7 @@ function New-ComsolSetupConfig {
     $config = Set-ConfigValue -ConfigText $config -Key "license"     -Value $Settings.License
     $config = Set-ConfigValue -ConfigText $config -Key "name"        -Value $Settings.Name
     $config = Set-ConfigValue -ConfigText $config -Key "company"     -Value $Settings.Company
+    $config = Set-ConfigValue -ConfigText $config -Key "lictype" -Value ""
 
     # Keep terminal output enabled.
     $config = Set-ConfigValue -ConfigText $config -Key "quiet" -Value "0"
