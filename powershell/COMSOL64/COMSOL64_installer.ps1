@@ -756,119 +756,254 @@ function Invoke-ProcessWithGuiOutput {
         [string]$OutputLogPath
     )
 
-    if (Test-Path -LiteralPath $OutputLogPath -PathType Leaf) {
-        Remove-Item -LiteralPath $OutputLogPath -Force
-    }
+    Write-GuiLog -Message "Preparing COMSOL installer launch debug log."
 
-    if (-not (Test-Path -LiteralPath $FilePath -PathType Leaf)) {
-        throw "setup.exe could not be found before launch."
-    }
+    $debugLogPath = Join-Path $script:TempDir "comsol64_launch_debug.log"
 
-    $setupExeName = Split-Path -Path $FilePath -Leaf
-    $setupRoot = Split-Path -Path $FilePath -Parent
+    function Write-LaunchDebug {
+        param([string]$Message)
 
-    if ($setupExeName -ne "setup.exe") {
-        throw "Installer file must be named setup.exe."
-    }
+        $stamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+        $line = "$stamp [LAUNCH DEBUG] $Message"
 
-    if (-not (Test-Path -LiteralPath (Join-Path $setupRoot "setup.exe") -PathType Leaf)) {
-        throw "setup.exe could not be found in resolved installer root."
-    }
-
-    $setupConfigPath = $Arguments[1]
-
-    if ([string]::IsNullOrWhiteSpace($setupConfigPath) -or -not (Test-Path -LiteralPath $setupConfigPath -PathType Leaf)) {
-        throw "setupconfig.ini could not be found before launch."
-    }
-
-    Write-GuiLog -Message "Launching COMSOL installer process."
-    Write-GuiLog -Message "Running setup.exe from installer root."
-    Write-GuiLog -Message "Installer output log will be kept."
-
-    # This intentionally mimics:
-    #   cd "<setup root>"
-    #   .\setup.exe -s "C:\Temp\setupconfig.ini"
-    #
-    # Use -LiteralPath so paths with spaces are safe.
-    $command = ".\setup.exe -s '$($setupConfigPath.Replace("'", "''"))'; exit `$LASTEXITCODE"
-
-$psi = New-Object System.Diagnostics.ProcessStartInfo
-$psi.FileName = "powershell.exe"
-$psi.WorkingDirectory = $setupRoot
-$psi.UseShellExecute = $false
-$psi.RedirectStandardOutput = $true
-$psi.RedirectStandardError = $true
-$psi.CreateNoWindow = $true
-
-[void]$psi.ArgumentList.Add("-NoProfile")
-[void]$psi.ArgumentList.Add("-ExecutionPolicy")
-[void]$psi.ArgumentList.Add("Bypass")
-[void]$psi.ArgumentList.Add("-Command")
-[void]$psi.ArgumentList.Add($command)
-
-    $process = New-Object System.Diagnostics.Process
-    $process.StartInfo = $psi
-    $process.EnableRaisingEvents = $true
-
-    $process.add_OutputDataReceived({
-        param($sender, $eventArgs)
-
-        if ($null -ne $eventArgs.Data -and $eventArgs.Data.Trim() -ne "") {
-            $displayLine = "[COMSOL STDOUT] $($eventArgs.Data)"
-            $stamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-            $fileLine = "$stamp $displayLine"
-
-            [Console]::Out.WriteLine($displayLine)
-            [Console]::Out.Flush()
-
-            Add-Content -Path $script:InstallerOutputLogPath -Value $fileLine
-            Add-Content -Path $script:WrapperLogPath -Value $fileLine
+        try {
+            Add-Content -LiteralPath $debugLogPath -Value $line
         }
-    })
-
-    $process.add_ErrorDataReceived({
-        param($sender, $eventArgs)
-
-        if ($null -ne $eventArgs.Data -and $eventArgs.Data.Trim() -ne "") {
-            $displayLine = "[COMSOL STDERR] $($eventArgs.Data)"
-            $stamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-            $fileLine = "$stamp $displayLine"
-
-            [Console]::Out.WriteLine($displayLine)
-            [Console]::Out.Flush()
-
-            Add-Content -Path $script:InstallerOutputLogPath -Value $fileLine
-            Add-Content -Path $script:WrapperLogPath -Value $fileLine
+        catch {
+            # Do not fail script if debug logging fails.
         }
-    })
 
-    [void]$process.Start()
-
-    $process.BeginOutputReadLine()
-    $process.BeginErrorReadLine()
-
-    Write-GuiLog -Message "COMSOL installer is running." -Percent 65
-
-    $lastProgressTime = Get-Date
-
-    while (-not $process.HasExited) {
-        Start-Sleep -Seconds 2
-
-        $now = Get-Date
-        if (($now - $lastProgressTime).TotalSeconds -ge 20) {
-            Write-GuiLog -Message "COMSOL installer still running." -Percent 70
-            $lastProgressTime = $now
+        try {
+            Add-Content -LiteralPath $script:WrapperLogPath -Value $line
+        }
+        catch {
+            # Do not fail script if wrapper logging fails.
         }
     }
 
-    $process.WaitForExit()
+    try {
+        if (Test-Path -LiteralPath $OutputLogPath -PathType Leaf) {
+            Remove-Item -LiteralPath $OutputLogPath -Force
+        }
 
-    Start-Sleep -Milliseconds 500
+        if (Test-Path -LiteralPath $debugLogPath -PathType Leaf) {
+            Remove-Item -LiteralPath $debugLogPath -Force
+        }
 
-    $exitCode = $process.ExitCode
-    $process.Dispose()
+        Write-LaunchDebug "Invoke-ProcessWithGuiOutput entered."
+        Write-LaunchDebug "FilePath received: $FilePath"
+        Write-LaunchDebug "OutputLogPath received: $OutputLogPath"
+        Write-LaunchDebug "Arguments count: $($Arguments.Count)"
 
-    return $exitCode
+        if ([string]::IsNullOrWhiteSpace($FilePath)) {
+            throw "Installer FilePath is blank before launch."
+        }
+
+        if (-not (Test-Path -LiteralPath $FilePath -PathType Leaf)) {
+            throw "setup.exe could not be found before launch: $FilePath"
+        }
+
+        $setupExeName = Split-Path -Path $FilePath -Leaf
+        $setupRoot = Split-Path -Path $FilePath -Parent
+
+        Write-LaunchDebug "setupExeName: $setupExeName"
+        Write-LaunchDebug "setupRoot: $setupRoot"
+
+        if ($setupExeName -ne "setup.exe") {
+            throw "Installer file must be named setup.exe."
+        }
+
+        if ([string]::IsNullOrWhiteSpace($setupRoot) -or -not (Test-Path -LiteralPath $setupRoot -PathType Container)) {
+            throw "Installer root folder could not be resolved."
+        }
+
+        $setupInRoot = Join-Path $setupRoot "setup.exe"
+
+        if (-not (Test-Path -LiteralPath $setupInRoot -PathType Leaf)) {
+            throw "setup.exe could not be found inside resolved installer root."
+        }
+
+        # Your current call passes @("-s", $script:FinalConfigPath)
+        $setupConfigPath = ""
+        if ($Arguments.Count -ge 2) {
+            $setupConfigPath = $Arguments[1]
+        }
+
+        Write-LaunchDebug "setupConfigPath resolved from Arguments[1]: $setupConfigPath"
+
+        if ([string]::IsNullOrWhiteSpace($setupConfigPath)) {
+            throw "setupconfig.ini path was blank before launch."
+        }
+
+        if (-not (Test-Path -LiteralPath $setupConfigPath -PathType Leaf)) {
+            throw "setupconfig.ini could not be found before launch: $setupConfigPath"
+        }
+
+        Write-GuiLog -Message "Launching COMSOL installer process."
+        Write-GuiLog -Message "Running setup.exe from installer root."
+        Write-GuiLog -Message "Installer output log will be kept."
+        Write-LaunchDebug "Validated setup.exe and setupconfig.ini."
+
+        # This is the actual command run in the child PowerShell:
+        #   Set-Location "<setup root>"
+        #   .\setup.exe -s "<setupconfig path>"
+        #   exit $LASTEXITCODE
+        #
+        # Single quotes are escaped for PowerShell string safety.
+        $safeSetupRoot = $setupRoot.Replace("'", "''")
+        $safeSetupConfigPath = $setupConfigPath.Replace("'", "''")
+
+        $command = @"
+`$ErrorActionPreference = 'Stop'
+Set-Location -LiteralPath '$safeSetupRoot'
+Write-Output "COMSOL launch cwd: `$((Get-Location).Path)"
+Write-Output "COMSOL launch command: .\setup.exe -s <setupconfig.ini>"
+.\setup.exe -s '$safeSetupConfigPath'
+`$exitCode = `$LASTEXITCODE
+Write-Output "COMSOL setup.exe returned exit code: `$exitCode"
+exit `$exitCode
+"@
+
+        Write-LaunchDebug "Child PowerShell command built."
+
+        # Windows PowerShell expects EncodedCommand as UTF-16LE.
+        $encodedCommand = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
+
+        Write-LaunchDebug "Encoded command length: $($encodedCommand.Length)"
+
+        $psi = New-Object System.Diagnostics.ProcessStartInfo
+
+        if ($null -eq $psi) {
+            throw "Failed to create ProcessStartInfo."
+        }
+
+        $psi.FileName = "powershell.exe"
+        $psi.Arguments = "-NoProfile -ExecutionPolicy Bypass -EncodedCommand $encodedCommand"
+        $psi.WorkingDirectory = $setupRoot
+        $psi.UseShellExecute = $false
+        $psi.RedirectStandardOutput = $true
+        $psi.RedirectStandardError = $true
+        $psi.CreateNoWindow = $true
+
+        Write-LaunchDebug "ProcessStartInfo created."
+        Write-LaunchDebug "psi.FileName: $($psi.FileName)"
+        Write-LaunchDebug "psi.WorkingDirectory: $($psi.WorkingDirectory)"
+        Write-LaunchDebug "psi.UseShellExecute: $($psi.UseShellExecute)"
+        Write-LaunchDebug "psi.RedirectStandardOutput: $($psi.RedirectStandardOutput)"
+        Write-LaunchDebug "psi.RedirectStandardError: $($psi.RedirectStandardError)"
+
+        $process = New-Object System.Diagnostics.Process
+
+        if ($null -eq $process) {
+            throw "Failed to create Process object."
+        }
+
+        $process.StartInfo = $psi
+        $process.EnableRaisingEvents = $true
+
+        Write-LaunchDebug "Process object created."
+
+        $process.add_OutputDataReceived({
+            param($sender, $eventArgs)
+
+            if ($null -ne $eventArgs -and $null -ne $eventArgs.Data -and $eventArgs.Data.Trim() -ne "") {
+                $displayLine = "[COMSOL STDOUT] $($eventArgs.Data)"
+                $stamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+                $fileLine = "$stamp $displayLine"
+
+                [Console]::Out.WriteLine($displayLine)
+                [Console]::Out.Flush()
+
+                Add-Content -Path $script:InstallerOutputLogPath -Value $fileLine
+                Add-Content -Path $script:WrapperLogPath -Value $fileLine
+            }
+        })
+
+        $process.add_ErrorDataReceived({
+            param($sender, $eventArgs)
+
+            if ($null -ne $eventArgs -and $null -ne $eventArgs.Data -and $eventArgs.Data.Trim() -ne "") {
+                $displayLine = "[COMSOL STDERR] $($eventArgs.Data)"
+                $stamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+                $fileLine = "$stamp $displayLine"
+
+                [Console]::Out.WriteLine($displayLine)
+                [Console]::Out.Flush()
+
+                Add-Content -Path $script:InstallerOutputLogPath -Value $fileLine
+                Add-Content -Path $script:WrapperLogPath -Value $fileLine
+            }
+        })
+
+        Write-LaunchDebug "Output handlers attached."
+
+        $started = $process.Start()
+
+        Write-LaunchDebug "process.Start() returned: $started"
+
+        if (-not $started) {
+            throw "PowerShell child process did not start."
+        }
+
+        Write-LaunchDebug "Calling BeginOutputReadLine."
+        $process.BeginOutputReadLine()
+
+        Write-LaunchDebug "Calling BeginErrorReadLine."
+        $process.BeginErrorReadLine()
+
+        Write-GuiLog -Message "COMSOL installer is running." -Percent 65
+
+        $lastProgressTime = Get-Date
+
+        while ($null -ne $process -and -not $process.HasExited) {
+            Start-Sleep -Seconds 2
+
+            $now = Get-Date
+            if (($now - $lastProgressTime).TotalSeconds -ge 20) {
+                Write-GuiLog -Message "COMSOL installer still running." -Percent 70
+                $lastProgressTime = $now
+            }
+
+            try {
+                $process.Refresh()
+            }
+            catch {
+                Write-LaunchDebug "process.Refresh() failed: $($_.Exception.Message)"
+            }
+        }
+
+        if ($null -eq $process) {
+            throw "Process object became null while waiting."
+        }
+
+        Write-LaunchDebug "Process has exited. Calling WaitForExit."
+        $process.WaitForExit()
+
+        Start-Sleep -Milliseconds 500
+
+        $exitCode = $process.ExitCode
+        Write-LaunchDebug "Final process exit code: $exitCode"
+
+        $process.Dispose()
+
+        Write-LaunchDebug "Process disposed."
+
+        return $exitCode
+    }
+    catch {
+        $msg = $_.Exception.Message
+        Write-LaunchDebug "ERROR in Invoke-ProcessWithGuiOutput: $msg"
+
+        if ($_.InvocationInfo) {
+            Write-LaunchDebug "Error line: $($_.InvocationInfo.Line)"
+            Write-LaunchDebug "Error position: $($_.InvocationInfo.PositionMessage)"
+        }
+
+        throw
+    }
+    finally {
+        Write-GuiLog -Message "COMSOL launch debug log kept at: $debugLogPath"
+    }
 }
 
 function Handle-ComsolExitCode {
