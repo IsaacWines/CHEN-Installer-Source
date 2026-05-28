@@ -620,9 +620,13 @@ function Set-ConfigValue {
         [Parameter(Mandatory = $true)]
         [string]$Key,
 
-        [Parameter(Mandatory = $true)]
-        [string]$Value
+        [AllowEmptyString()]
+        [string]$Value = ""
     )
+
+    if ($null -eq $Value) {
+        $Value = ""
+    }
 
     $escapedKey = [regex]::Escape($Key)
     $pattern = "(?m)^\s*$escapedKey\s*=.*$"
@@ -698,7 +702,7 @@ function New-ComsolSetupConfig {
     $config = Set-ConfigValue -ConfigText $config -Key "license"     -Value $Settings.License
     $config = Set-ConfigValue -ConfigText $config -Key "name"        -Value $Settings.Name
     $config = Set-ConfigValue -ConfigText $config -Key "company"     -Value $Settings.Company
-    $config = Set-ConfigValue -ConfigText $config -Key "lictype" -Value ""
+    $config = Set-ConfigValue -ConfigText $config -Key "lictype"     -Value ""
 
     # Keep terminal output enabled.
     $config = Set-ConfigValue -ConfigText $config -Key "quiet" -Value "0"
