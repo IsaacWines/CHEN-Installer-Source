@@ -785,20 +785,21 @@ function Invoke-ProcessWithGuiOutput {
     #   .\setup.exe -s "C:\Temp\setupconfig.ini"
     #
     # Use -LiteralPath so paths with spaces are safe.
-    $command = @"
-Set-Location -LiteralPath '$($setupRoot.Replace("'", "''"))'
-.\setup.exe -s '$($setupConfigPath.Replace("'", "''"))'
-exit `$LASTEXITCODE
-"@
+    $command = ".\setup.exe -s '$($setupConfigPath.Replace("'", "''"))'; exit `$LASTEXITCODE"
 
-    $psi = New-Object System.Diagnostics.ProcessStartInfo
-    $psi.FileName = "powershell.exe"
-    $psi.Arguments = "-NoProfile -ExecutionPolicy Bypass -Command $([Management.Automation.Language.CodeGeneration]::QuoteArgument($command))"
-    $psi.WorkingDirectory = $setupRoot
-    $psi.UseShellExecute = $false
-    $psi.RedirectStandardOutput = $true
-    $psi.RedirectStandardError = $true
-    $psi.CreateNoWindow = $true
+$psi = New-Object System.Diagnostics.ProcessStartInfo
+$psi.FileName = "powershell.exe"
+$psi.WorkingDirectory = $setupRoot
+$psi.UseShellExecute = $false
+$psi.RedirectStandardOutput = $true
+$psi.RedirectStandardError = $true
+$psi.CreateNoWindow = $true
+
+[void]$psi.ArgumentList.Add("-NoProfile")
+[void]$psi.ArgumentList.Add("-ExecutionPolicy")
+[void]$psi.ArgumentList.Add("Bypass")
+[void]$psi.ArgumentList.Add("-Command")
+[void]$psi.ArgumentList.Add($command)
 
     $process = New-Object System.Diagnostics.Process
     $process.StartInfo = $psi
