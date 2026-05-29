@@ -16,7 +16,7 @@ param(
   [string]$InstallerPath = "",
 
   # setupconfig.ini File From Repo
-  [string]$SetupConfigUrl = "https://raw.githubusercontent.com/IsaacWines/CHEN-Installer-Source/refs/heads/testing/powershell/COMSOL64/setupconfig.ini",
+  [string]$SetupConfigUrl = "https://raw.githubusercontent.com/IsaacWines/CHEN-Installer-Source/refs/heads/main/powershell/COMSOL64/setupconfig.ini",
 
   # Initialize Common GUI Helper and Script Functions
   [string]$CommonPath = "$PSScriptRoot\common.ps1",
