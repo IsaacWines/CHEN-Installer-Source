@@ -9,9 +9,6 @@
 
 param(
 
-  # Optional Netowrk Override Path
-  [string]$NetworkRoot = "",
-
   # Optional Manual Override
   [string]$InstallerPath = "",
 
