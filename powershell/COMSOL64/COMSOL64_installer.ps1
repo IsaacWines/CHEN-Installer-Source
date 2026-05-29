@@ -56,7 +56,7 @@ if (Test-Path -Path $CommonPath -PathType Leaf) {
     . $CommonPath
 }
 else {
-    [Console]::Out.WriteLine("WARNING: common.ps1 not found at: $CommonPath")
+    throw "common.ps1 not found at: $CommonPath"
 }
 
 if (-not (Get-Command -Name Get-GuiNetworkRoot -ErrorAction SilentlyContinue)) {
