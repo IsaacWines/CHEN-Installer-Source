@@ -1,52 +1,42 @@
-# ~/powershell/COMSOL64/COMSOL64_installer.ps1
-#
+# ~/powershell/COMSOL/COMSOL_installer.ps1
 # ===========================================
-# Installer Powershell Script for COMSOL 6.4
+# Installer PowerShell Script for COMSOL
 # ===========================================
-# ---
-# Utilizes a dynamically generated setupconfig.ini
-# ---
+# Dynamically generates setupconfig.ini, supports express COMSOL 6.4 install/uninstall,
+# version-specific setup.exe selection, GUI progress output, and reliable cleanup.
 
 param(
+    # Optional manual setup.exe override. Most GUI runs should leave this blank.
+    [string]$InstallerPath = "",
 
-  # Optional Netowrk Override Path
-  [string]$NetworkRoot = "",
+    # Shared setupconfig.ini template used for every COMSOL version.
+    [string]$SetupConfigUrl = "https://raw.githubusercontent.com/IsaacWines/CHEN-Installer-Source/refs/heads/main/powershell/COMSOL/setupconfig.ini",
 
-  # Optional Manual Override
-  [string]$InstallerPath = "",
+    # Shared helper file downloaded beside this script by the GUI.
+    [string]$CommonPath = "$PSScriptRoot\common.ps1",
 
-  # setupconfig.ini File From Repo
-  [string]$SetupConfigUrl = "https://raw.githubusercontent.com/IsaacWines/CHEN-Installer-Source/refs/heads/testing/powershell/COMSOL64/setupconfig.ini",
-
-  # Initialize Common GUI Helper and Script Functions
-  [string]$CommonPath = "$PSScriptRoot\common.ps1",
-
-  # COMSOL Install Path
-  [string]$InstallDirectory = "C:\Program Files\COMSOL\COMSOL64\Multiphysics",
-
-  # Values From GUI Prompts 
-  [string]$InstallMode = "",
-  [string]$LicensePort = "",
-  [string]$LicenseServer = "",
-  [string]$ComsolUserName = "",
-  [string]$CompanyName = "",
-
-  # Optional Script Behaviors
-  [switch]$NoComsolGui,
-  [switch]$NoConfirm
+    # Optional script behaviors.
+    [switch]$NoComsolGui,
+    [switch]$NoConfirm
 )
 
 $ErrorActionPreference = "Stop"
-
 $script:FinalExitCode = 0
 
-$script:COMSOL64NetworkRelativePath = "Support\Software\Comsol Multiphysics\Software\Comsol 6.4\378\setup.exe"
+# ==========================
+# Constants
+# ==========================
+
+$script:Comsol64VersionText = "6.4"
+$script:Comsol64InstallDir = "C:\Program Files\COMSOL\COMSOL64\Multiphysics"
+$script:Comsol64NetworkRelativeSetupPath = "Support\Software\Comsol Multiphysics\Software\Comsol 6.4\378\setup.exe"
+$script:ComsolNetworkSoftwareRootRelativePath = "Support\Software\Comsol Multiphysics\Software"
 
 $script:TempDir = "C:\Temp"
-$script:DownloadedConfigPath = Join-Path $script:TempDir "setupconfig.comsol64.downloaded.ini"
+$script:DownloadedConfigPath = Join-Path $script:TempDir "setupconfig.comsol.downloaded.ini"
 $script:FinalConfigPath = Join-Path $script:TempDir "setupconfig.ini"
-$script:WrapperLogPath = Join-Path $script:TempDir "comsol64_install_wrapper.log"
-$script:InstallerOutputLogPath = Join-Path $script:TempDir "comsol64_installer_output.log"
+$script:WrapperLogPath = Join-Path $script:TempDir "comsol_install_wrapper.log"
+$script:InstallerOutputLogPath = Join-Path $script:TempDir "comsol_installer_output.log"
 
 # ==========================
 # Load common.ps1
@@ -57,6 +47,24 @@ if (Test-Path -Path $CommonPath -PathType Leaf) {
 }
 else {
     [Console]::Out.WriteLine("WARNING: common.ps1 not found at: $CommonPath")
+}
+
+# Fallback only. Normal GUI flow should use Get-GuiNetworkRoot from common.ps1.
+if (-not (Get-Command -Name Get-GuiNetworkRoot -ErrorAction SilentlyContinue)) {
+    function Get-GuiNetworkRoot {
+        if ([string]::IsNullOrWhiteSpace($env:CHEN_NETWORK_ROOT)) {
+            return ""
+        }
+
+        $cleanRoot = $env:CHEN_NETWORK_ROOT.Trim().Replace("/", "\")
+        $cleanRoot = $cleanRoot -replace "[\\\/]+$", ""
+
+        if (-not $cleanRoot.StartsWith("\\")) {
+            $cleanRoot = "\\" + ($cleanRoot -replace "^[\\\/]+", "")
+        }
+
+        return $cleanRoot
+    }
 }
 
 # ==========================
@@ -216,24 +224,261 @@ function Show-ErrorPrompt {
     )
 }
 
-function Show-ComsolSetupFilePicker {
+function Show-TwoButtonChoice {
     param(
-        [string]$InitialDirectory = ""
+        [string]$Title,
+        [string]$Message,
+        [string]$LeftButtonText,
+        [string]$RightButtonText
     )
 
     Initialize-WindowsForms
 
+    $form = New-Object System.Windows.Forms.Form
+    $form.Text = $Title
+    $form.StartPosition = "CenterScreen"
+    $form.Size = New-Object System.Drawing.Size -ArgumentList 650, 260
+    $form.MinimumSize = New-Object System.Drawing.Size -ArgumentList 650, 260
+    $form.MaximizeBox = $false
+    $form.MinimizeBox = $false
+    $form.FormBorderStyle = "FixedDialog"
+    $form.BackColor = [System.Drawing.Color]::FromArgb(245, 245, 245)
+
+    $mainLayout = New-Object System.Windows.Forms.TableLayoutPanel
+    $mainLayout.Dock = "Fill"
+    $mainLayout.ColumnCount = 1
+    $mainLayout.RowCount = 4
+    $mainLayout.Padding = New-Object System.Windows.Forms.Padding -ArgumentList 24, 18, 24, 18
+    $mainLayout.BackColor = $form.BackColor
+    [void]$mainLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 42)))
+    [void]$mainLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Percent, 100)))
+    [void]$mainLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 54)))
+    [void]$mainLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 44)))
+    $form.Controls.Add($mainLayout)
+
+    $titleLabel = New-Object System.Windows.Forms.Label
+    $titleLabel.Text = $Title
+    $titleLabel.Dock = "Fill"
+    $titleLabel.TextAlign = "MiddleCenter"
+    $titleLabel.Font = New-Object System.Drawing.Font("Segoe UI", 13, [System.Drawing.FontStyle]::Bold)
+    $mainLayout.Controls.Add($titleLabel, 0, 0)
+
+    $messageLabel = New-Object System.Windows.Forms.Label
+    $messageLabel.Text = $Message
+    $messageLabel.Dock = "Fill"
+    $messageLabel.TextAlign = "MiddleCenter"
+    $messageLabel.Font = New-Object System.Drawing.Font("Segoe UI", 9.5, [System.Drawing.FontStyle]::Regular)
+    $messageLabel.ForeColor = [System.Drawing.Color]::FromArgb(35, 35, 35)
+    $mainLayout.Controls.Add($messageLabel, 0, 1)
+
+    $buttonPanel = New-Object System.Windows.Forms.TableLayoutPanel
+    $buttonPanel.Dock = "Fill"
+    $buttonPanel.ColumnCount = 2
+    $buttonPanel.RowCount = 1
+    $buttonPanel.Margin = New-Object System.Windows.Forms.Padding -ArgumentList 16, 5, 16, 5
+    [void]$buttonPanel.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 50)))
+    [void]$buttonPanel.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 50)))
+    $mainLayout.Controls.Add($buttonPanel, 0, 2)
+
+    $leftButton = New-Object System.Windows.Forms.Button
+    $leftButton.Text = $LeftButtonText
+    $leftButton.Dock = "Fill"
+    $leftButton.Margin = New-Object System.Windows.Forms.Padding -ArgumentList 6, 6, 6, 6
+    $leftButton.Font = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawing.FontStyle]::Regular)
+    $leftButton.FlatStyle = "Flat"
+    $leftButton.BackColor = [System.Drawing.Color]::White
+    $leftButton.UseVisualStyleBackColor = $false
+    $buttonPanel.Controls.Add($leftButton, 0, 0)
+
+    $rightButton = New-Object System.Windows.Forms.Button
+    $rightButton.Text = $RightButtonText
+    $rightButton.Dock = "Fill"
+    $rightButton.Margin = New-Object System.Windows.Forms.Padding -ArgumentList 6, 6, 6, 6
+    $rightButton.Font = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawing.FontStyle]::Regular)
+    $rightButton.FlatStyle = "Flat"
+    $rightButton.BackColor = [System.Drawing.Color]::White
+    $rightButton.UseVisualStyleBackColor = $false
+    $buttonPanel.Controls.Add($rightButton, 1, 0)
+
+    $bottomPanel = New-Object System.Windows.Forms.Panel
+    $bottomPanel.Dock = "Fill"
+    $bottomPanel.BackColor = $form.BackColor
+    $mainLayout.Controls.Add($bottomPanel, 0, 3)
+
+    $cancelButton = New-Object System.Windows.Forms.Button
+    $cancelButton.Text = "Cancel"
+    $cancelButton.Width = 110
+    $cancelButton.Height = 30
+    $cancelButton.Location = New-Object System.Drawing.Point -ArgumentList 470, 7
+    $cancelButton.Font = New-Object System.Drawing.Font("Segoe UI", 9.5, [System.Drawing.FontStyle]::Regular)
+    $cancelButton.FlatStyle = "Flat"
+    $cancelButton.BackColor = [System.Drawing.Color]::WhiteSmoke
+    $cancelButton.UseVisualStyleBackColor = $false
+    $bottomPanel.Controls.Add($cancelButton)
+
+    $selection = @{ Value = "Cancel" }
+
+    $leftButton.Add_Click({ $selection.Value = "Left"; $form.Close() })
+    $rightButton.Add_Click({ $selection.Value = "Right"; $form.Close() })
+    $cancelButton.Add_Click({ $selection.Value = "Cancel"; $form.Close() })
+    $form.CancelButton = $cancelButton
+
+    [void]$form.ShowDialog()
+    return $selection.Value
+}
+
+function Show-ComsolWorkflowPrompt {
+    param(
+        [string]$NetworkRoot
+    )
+
+    Initialize-WindowsForms
+
+    $hasNetworkRoot = -not [string]::IsNullOrWhiteSpace($NetworkRoot)
+
+    $form = New-Object System.Windows.Forms.Form
+    $form.Text = "Select COMSOL Installer Mode"
+    $form.StartPosition = "CenterScreen"
+    $form.Size = New-Object System.Drawing.Size -ArgumentList 720, 410
+    $form.MinimumSize = New-Object System.Drawing.Size -ArgumentList 720, 410
+    $form.MaximizeBox = $false
+    $form.MinimizeBox = $false
+    $form.FormBorderStyle = "FixedDialog"
+    $form.BackColor = [System.Drawing.Color]::FromArgb(245, 245, 245)
+
+    $mainLayout = New-Object System.Windows.Forms.TableLayoutPanel
+    $mainLayout.Dock = "Fill"
+    $mainLayout.ColumnCount = 1
+    $mainLayout.RowCount = 8
+    $mainLayout.Padding = New-Object System.Windows.Forms.Padding -ArgumentList 24, 18, 24, 18
+    $mainLayout.BackColor = $form.BackColor
+    [void]$mainLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 42)))
+    [void]$mainLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 44)))
+    [void]$mainLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 52)))
+    [void]$mainLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 52)))
+    [void]$mainLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 52)))
+    [void]$mainLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 52)))
+    [void]$mainLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Percent, 100)))
+    [void]$mainLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 44)))
+    $form.Controls.Add($mainLayout)
+
+    $titleLabel = New-Object System.Windows.Forms.Label
+    $titleLabel.Text = "Choose COMSOL Action"
+    $titleLabel.Dock = "Fill"
+    $titleLabel.TextAlign = "MiddleCenter"
+    $titleLabel.Font = New-Object System.Drawing.Font("Segoe UI", 13, [System.Drawing.FontStyle]::Bold)
+    $mainLayout.Controls.Add($titleLabel, 0, 0)
+
+    $networkLabel = New-Object System.Windows.Forms.Label
+    $networkLabel.Dock = "Fill"
+    $networkLabel.TextAlign = "MiddleCenter"
+    $networkLabel.Font = New-Object System.Drawing.Font("Segoe UI", 9.5, [System.Drawing.FontStyle]::Regular)
+    if ($hasNetworkRoot) {
+        $networkLabel.Text = "Network root received from GUI. Express network options are available."
+        $networkLabel.ForeColor = [System.Drawing.Color]::FromArgb(30, 30, 30)
+    }
+    else {
+        $networkLabel.Text = "No network root was received from the GUI. Only the no-network-root option is available."
+        $networkLabel.ForeColor = [System.Drawing.Color]::DarkRed
+    }
+    $mainLayout.Controls.Add($networkLabel, 0, 1)
+
+    $buttonFont = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawing.FontStyle]::Regular)
+
+    $expressInstallButton = New-Object System.Windows.Forms.Button
+    $expressInstallButton.Text = "Express COMSOL 6.4 Install"
+    $expressInstallButton.Dock = "Fill"
+    $expressInstallButton.Margin = New-Object System.Windows.Forms.Padding -ArgumentList 16, 6, 16, 6
+    $expressInstallButton.Font = $buttonFont
+    $expressInstallButton.FlatStyle = "Flat"
+    $expressInstallButton.BackColor = [System.Drawing.Color]::White
+    $expressInstallButton.UseVisualStyleBackColor = $false
+    $expressInstallButton.Enabled = $hasNetworkRoot
+    if (-not $hasNetworkRoot) { $expressInstallButton.BackColor = [System.Drawing.Color]::Gainsboro }
+    $mainLayout.Controls.Add($expressInstallButton, 0, 2)
+
+    $expressUninstallButton = New-Object System.Windows.Forms.Button
+    $expressUninstallButton.Text = "Express COMSOL 6.4 Uninstall"
+    $expressUninstallButton.Dock = "Fill"
+    $expressUninstallButton.Margin = New-Object System.Windows.Forms.Padding -ArgumentList 16, 6, 16, 6
+    $expressUninstallButton.Font = $buttonFont
+    $expressUninstallButton.FlatStyle = "Flat"
+    $expressUninstallButton.BackColor = [System.Drawing.Color]::White
+    $expressUninstallButton.UseVisualStyleBackColor = $false
+    $expressUninstallButton.Enabled = $hasNetworkRoot
+    if (-not $hasNetworkRoot) { $expressUninstallButton.BackColor = [System.Drawing.Color]::Gainsboro }
+    $mainLayout.Controls.Add($expressUninstallButton, 0, 3)
+
+    $networkPickButton = New-Object System.Windows.Forms.Button
+    $networkPickButton.Text = "Pick COMSOL Version From Network Root"
+    $networkPickButton.Dock = "Fill"
+    $networkPickButton.Margin = New-Object System.Windows.Forms.Padding -ArgumentList 16, 6, 16, 6
+    $networkPickButton.Font = $buttonFont
+    $networkPickButton.FlatStyle = "Flat"
+    $networkPickButton.BackColor = [System.Drawing.Color]::White
+    $networkPickButton.UseVisualStyleBackColor = $false
+    $networkPickButton.Enabled = $hasNetworkRoot
+    if (-not $hasNetworkRoot) { $networkPickButton.BackColor = [System.Drawing.Color]::Gainsboro }
+    $mainLayout.Controls.Add($networkPickButton, 0, 4)
+
+    $noNetworkButton = New-Object System.Windows.Forms.Button
+    $noNetworkButton.Text = "Pick setup.exe Without Network Root"
+    $noNetworkButton.Dock = "Fill"
+    $noNetworkButton.Margin = New-Object System.Windows.Forms.Padding -ArgumentList 16, 6, 16, 6
+    $noNetworkButton.Font = $buttonFont
+    $noNetworkButton.FlatStyle = "Flat"
+    $noNetworkButton.BackColor = [System.Drawing.Color]::White
+    $noNetworkButton.UseVisualStyleBackColor = $false
+    $mainLayout.Controls.Add($noNetworkButton, 0, 5)
+
+    $bottomPanel = New-Object System.Windows.Forms.Panel
+    $bottomPanel.Dock = "Fill"
+    $bottomPanel.BackColor = $form.BackColor
+    $mainLayout.Controls.Add($bottomPanel, 0, 7)
+
+    $cancelButton = New-Object System.Windows.Forms.Button
+    $cancelButton.Text = "Cancel"
+    $cancelButton.Width = 110
+    $cancelButton.Height = 30
+    $cancelButton.Location = New-Object System.Drawing.Point -ArgumentList 560, 7
+    $cancelButton.Font = New-Object System.Drawing.Font("Segoe UI", 9.5, [System.Drawing.FontStyle]::Regular)
+    $cancelButton.FlatStyle = "Flat"
+    $cancelButton.BackColor = [System.Drawing.Color]::WhiteSmoke
+    $cancelButton.UseVisualStyleBackColor = $false
+    $bottomPanel.Controls.Add($cancelButton)
+
+    $selection = @{ Action = "Cancel" }
+
+    $expressInstallButton.Add_Click({ $selection.Action = "Express64Install"; $form.Close() })
+    $expressUninstallButton.Add_Click({ $selection.Action = "Express64Uninstall"; $form.Close() })
+    $networkPickButton.Add_Click({ $selection.Action = "NetworkPick"; $form.Close() })
+    $noNetworkButton.Add_Click({ $selection.Action = "NoNetworkPick"; $form.Close() })
+    $cancelButton.Add_Click({ $selection.Action = "Cancel"; $form.Close() })
+    $form.CancelButton = $cancelButton
+
+    [void]$form.ShowDialog()
+    return $selection.Action
+}
+
+function Show-ComsolSetupFilePicker {
+    param(
+        [string]$InitialDirectory = "C:\"
+    )
+
+    Initialize-WindowsForms
+
+    if ([string]::IsNullOrWhiteSpace($InitialDirectory) -or -not (Test-Path -LiteralPath $InitialDirectory -PathType Container)) {
+        $InitialDirectory = "C:\"
+    }
+
     $dialog = New-Object System.Windows.Forms.OpenFileDialog
-    $dialog.Title = "Select COMSOL 6.4 setup.exe"
+    $dialog.Title = "Select COMSOL setup.exe"
     $dialog.Filter = "COMSOL setup.exe|setup.exe|Executable files (*.exe)|*.exe|All files (*.*)|*.*"
     $dialog.CheckFileExists = $true
     $dialog.CheckPathExists = $true
     $dialog.Multiselect = $false
     $dialog.FileName = "setup.exe"
-
-    if (-not [string]::IsNullOrWhiteSpace($InitialDirectory) -and (Test-Path -Path $InitialDirectory -PathType Container)) {
-        $dialog.InitialDirectory = $InitialDirectory
-    }
+    $dialog.InitialDirectory = $InitialDirectory
 
     $result = $dialog.ShowDialog()
 
@@ -253,6 +498,9 @@ function Send-ProgressSafe {
         [int]$Percent,
         [string]$Message
     )
+
+    if ($Percent -lt 0) { $Percent = 0 }
+    if ($Percent -gt 100) { $Percent = 100 }
 
     $cmd = Get-Command -Name Send-GuiProgress -ErrorAction SilentlyContinue
 
@@ -277,6 +525,7 @@ function Write-GuiLog {
 
         [int]$Percent = -1,
 
+        [ValidateSet("INFO", "WARN", "ERROR")]
         [string]$Level = "INFO"
     )
 
@@ -298,12 +547,9 @@ function Write-GuiLog {
     }
 
     if ($Percent -ge 0) {
-        # Only send progress message.
-        # Do NOT also write displayLine to stdout, because the GUI logs progress messages.
         Send-ProgressSafe -Percent $Percent -Message $displayLine
     }
     else {
-        # Only normal non-progress lines go directly to GUI terminal.
         [Console]::Out.WriteLine($displayLine)
         [Console]::Out.Flush()
     }
@@ -368,6 +614,25 @@ function Normalize-NetworkRoot {
     return $cleanRoot
 }
 
+function Get-NativeFileSystemPath {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+
+    $resolved = Resolve-Path -LiteralPath $Path -ErrorAction Stop | Select-Object -First 1
+
+    if ($null -eq $resolved) {
+        throw "Could not resolve path: $Path"
+    }
+
+    if ($resolved.Provider.Name -ne "FileSystem") {
+        throw "Resolved path is not a FileSystem path: $Path"
+    }
+
+    return $resolved.ProviderPath
+}
+
 function Test-ComsolSetupExe {
     param(
         [Parameter(Mandatory = $true)]
@@ -384,75 +649,60 @@ function Test-ComsolSetupExe {
 
     $item = Get-Item -LiteralPath $Path
 
-    if ($item.Name -ne "setup.exe") {
-        return $false
-    }
-
-    return $true
+    return ($item.Name -eq "setup.exe")
 }
 
-function Resolve-ComsolInstallerPath {
+function Get-ComsolInstallDirectoryForVersion {
     param(
-        [string]$NetworkRoot,
-        [string]$ManualInstallerPath = ""
+        [Parameter(Mandatory = $true)]
+        [string]$VersionText
     )
 
-    Write-GuiLog -Message "Resolving COMSOL 6.4 installer path." -Percent 3
+    $cleanVersion = $VersionText.Trim()
+    $cleanVersion = $cleanVersion -replace "\s+", ""
+    $cleanVersion = $cleanVersion -replace "\.", ""
 
-    if (-not [string]::IsNullOrWhiteSpace($ManualInstallerPath)) {
-        Write-GuiLog -Message "Manual installer path was provided."
+    if ([string]::IsNullOrWhiteSpace($cleanVersion)) {
+        throw "COMSOL version number cannot be blank."
+    }
 
-        if (Test-ComsolSetupExe -Path $ManualInstallerPath) {
-            Write-GuiLog -Message "Manual installer path verified."
-            return (Resolve-Path -LiteralPath $ManualInstallerPath).Path
+    return "C:\Program Files\COMSOL\COMSOL$cleanVersion\Multiphysics"
+}
+
+function Get-ComsolVersionFromUser {
+    while ($true) {
+        $version = Show-InputBox `
+            -Title "COMSOL Version" `
+            -Prompt "Enter the COMSOL version number for the selected setup.exe.`n`nExamples: 6.4, 6.3, 4.4a.`nThe dot will be removed when building the install directory." `
+            -DefaultValue ""
+
+        if (-not [string]::IsNullOrWhiteSpace($version)) {
+            return $version.Trim()
         }
 
-        Write-GuiLog -Message "Manual installer path was not a valid setup.exe. Falling back to GUI network root/file picker." -Level "WARN"
-    }
-
-    $normalizedRoot = Get-GuiNetworkRoot
-
-    if (-not [string]::IsNullOrWhiteSpace($normalizedRoot)) {
-        $candidatePath = Join-Path -Path $normalizedRoot -ChildPath $script:COMSOL64NetworkRelativePath
-
-        Write-GuiLog -Message "Checking COMSOL installer path from GUI network root."
-
-        if (Test-ComsolSetupExe -Path $candidatePath) {
-            Write-GuiLog -Message "Found COMSOL setup.exe from GUI network root."
-            return (Resolve-Path -LiteralPath $candidatePath).Path
+        $retry = Show-YesNoPrompt -Title "Required Version" -Message "A COMSOL version number is required. Do you want to try again?"
+        if (-not $retry) {
+            throw "COMSOL version entry was cancelled."
         }
-
-        Write-GuiLog -Message "GUI network root did not lead to the expected COMSOL setup.exe." -Level "WARN"
     }
-    else {
-        Write-GuiLog -Message "No GUI network root value was received." -Level "WARN"
+}
+
+function Get-InstallModeFromTwoButtonPrompt {
+    $choice = Show-TwoButtonChoice `
+        -Title "Install or Uninstall" `
+        -Message "Choose whether to install or uninstall the selected COMSOL version." `
+        -LeftButtonText "Install" `
+        -RightButtonText "Uninstall"
+
+    switch ($choice) {
+        "Left" { return "install" }
+        "Right" { return "uninstall" }
+        default { throw "Install/uninstall selection was cancelled." }
     }
-
-    Write-GuiLog -Message "Opening file picker for COMSOL setup.exe." -Percent 5
-
-    $initialDir = ""
-    if (-not [string]::IsNullOrWhiteSpace($normalizedRoot) -and (Test-Path -Path $normalizedRoot -PathType Container)) {
-        $initialDir = $normalizedRoot
-    }
-
-    $selectedPath = Show-ComsolSetupFilePicker -InitialDirectory $initialDir
-
-    if ([string]::IsNullOrWhiteSpace($selectedPath)) {
-        throw "No setup.exe was selected. Cancelling installation."
-    }
-
-    Write-GuiLog -Message "User selected an installer path."
-
-    if (-not (Test-ComsolSetupExe -Path $selectedPath)) {
-        throw "Selected file must be named setup.exe."
-    }
-
-    Write-GuiLog -Message "Selected setup.exe verified."
-    return (Resolve-Path -LiteralPath $selectedPath).Path
 }
 
 # ==========================
-# Prompt / validation helpers
+# Prompt / workflow helpers
 # ==========================
 
 function Get-RequiredValue {
@@ -482,43 +732,6 @@ function Get-RequiredValue {
     }
 }
 
-function Get-InstallMode {
-    param(
-        [string]$CurrentValue
-    )
-
-    if (-not [string]::IsNullOrWhiteSpace($CurrentValue)) {
-        $clean = $CurrentValue.Trim().ToLower()
-
-        if ($clean -in @("install", "uninstall")) {
-            return $clean
-        }
-
-        throw "Invalid install mode passed from GUI. Must be install or uninstall."
-    }
-
-    while ($true) {
-        $value = Show-InputBox `
-            -Title "COMSOL Install Mode" `
-            -Prompt "Enter install mode. Valid options are: install or uninstall." `
-            -DefaultValue ""
-
-        $value = $value.Trim().ToLower()
-
-        if ($value -in @("install", "uninstall")) {
-            return $value
-        }
-
-        $retry = Show-YesNoPrompt `
-            -Title "Invalid Install Mode" `
-            -Message "Install mode must be either install or uninstall. Do you want to try again?"
-
-        if (-not $retry) {
-            throw "Invalid install mode cancelled by user."
-        }
-    }
-}
-
 function Get-LicensePort {
     param(
         [string]$CurrentValue
@@ -526,7 +739,6 @@ function Get-LicensePort {
 
     if (-not [string]::IsNullOrWhiteSpace($CurrentValue)) {
         $clean = $CurrentValue.Trim()
-
         $port = 0
         $valid = [int]::TryParse($clean, [ref]$port)
 
@@ -544,7 +756,6 @@ function Get-LicensePort {
             -DefaultValue ""
 
         $raw = $raw.Trim()
-
         $port = 0
         $valid = [int]::TryParse($raw, [ref]$port)
 
@@ -562,49 +773,207 @@ function Get-LicensePort {
     }
 }
 
-function Get-ComsolSettings {
-    Write-GuiLog -Message "Collecting COMSOL setup values." -Percent 10
+function Get-ComsolInstallDetails {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object]$Workflow
+    )
 
-    $finalInstallDir = Get-RequiredValue `
-        -CurrentValue $InstallDirectory `
-        -Title "COMSOL Install Directory" `
-        -Prompt "Enter the COMSOL install directory. For uninstall, this should be the existing COMSOL installation directory." `
-        -DefaultValue "C:\Program Files\COMSOL\COMSOL64\Multiphysics"
-
-    $finalInstallMode = Get-InstallMode -CurrentValue $InstallMode
-
-    if ($finalInstallMode -eq "uninstall" -and -not (Test-Path -LiteralPath $finalInstallDir -PathType Container)) {
-        throw "Install directory does not exist for uninstall mode."
+    if ($Workflow.InstallMode -eq "uninstall") {
+        return [pscustomobject]@{
+            InstallDir  = $Workflow.InstallDir
+            InstallMode = "uninstall"
+            License     = ""
+            Port        = ""
+            Server      = ""
+            LicenseNo   = ""
+            Name        = ""
+            Company     = ""
+        }
     }
 
-    $finalPort = Get-LicensePort -CurrentValue $LicensePort
+    Write-GuiLog -Message "Collecting COMSOL license and user values." -Percent 10
+
+    $finalPort = Get-LicensePort -CurrentValue ""
 
     $finalServer = Get-RequiredValue `
-        -CurrentValue $LicenseServer `
+        -CurrentValue "" `
         -Title "COMSOL License Server" `
         -Prompt "Enter the COMSOL license server hostname." `
         -DefaultValue ""
 
+    $finalLicenseNo = Get-RequiredValue `
+        -CurrentValue "" `
+        -Title "COMSOL License Number" `
+        -Prompt "Enter the COMSOL license number to write to licno." `
+        -DefaultValue ""
+
     $finalName = Get-RequiredValue `
-        -CurrentValue $ComsolUserName `
+        -CurrentValue "" `
         -Title "COMSOL User Name" `
         -Prompt "Enter the name of the person using COMSOL." `
         -DefaultValue ""
 
     $finalCompany = Get-RequiredValue `
-        -CurrentValue $CompanyName `
+        -CurrentValue "" `
         -Title "COMSOL Company / Organization" `
         -Prompt "Enter the company or organization name." `
         -DefaultValue ""
 
     return [pscustomobject]@{
-        InstallDir  = $finalInstallDir
-        InstallMode = $finalInstallMode
+        InstallDir  = $Workflow.InstallDir
+        InstallMode = "install"
         Port        = $finalPort
         Server      = $finalServer
+        LicenseNo   = $finalLicenseNo
         Name        = $finalName
         Company     = $finalCompany
         License     = "$finalPort@$finalServer"
+    }
+}
+
+function Select-ComsolSetupFromNetworkRoot {
+    param(
+        [string]$NetworkRoot
+    )
+
+    if ([string]::IsNullOrWhiteSpace($NetworkRoot)) {
+        throw "A GUI network root is required for this option."
+    }
+
+    $softwareRoot = Join-Path -Path $NetworkRoot -ChildPath $script:ComsolNetworkSoftwareRootRelativePath
+
+    if (-not (Test-Path -LiteralPath $softwareRoot -PathType Container)) {
+        throw "COMSOL network software root does not exist."
+    }
+
+    $selectedPath = Show-ComsolSetupFilePicker -InitialDirectory $softwareRoot
+
+    if ([string]::IsNullOrWhiteSpace($selectedPath)) {
+        throw "No setup.exe was selected. Cancelling installation."
+    }
+
+    if (-not (Test-ComsolSetupExe -Path $selectedPath)) {
+        throw "Selected file must be named setup.exe."
+    }
+
+    return Get-NativeFileSystemPath -Path $selectedPath
+}
+
+function Select-ComsolSetupWithoutNetworkRoot {
+    $selectedPath = Show-ComsolSetupFilePicker -InitialDirectory "C:\"
+
+    if ([string]::IsNullOrWhiteSpace($selectedPath)) {
+        throw "No setup.exe was selected. Cancelling installation."
+    }
+
+    if (-not (Test-ComsolSetupExe -Path $selectedPath)) {
+        throw "Selected file must be named setup.exe."
+    }
+
+    return Get-NativeFileSystemPath -Path $selectedPath
+}
+
+function Get-ComsolWorkflow {
+    param(
+        [string]$ManualInstallerPath = ""
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($ManualInstallerPath)) {
+        if (-not (Test-ComsolSetupExe -Path $ManualInstallerPath)) {
+            throw "Manual installer path must point to setup.exe."
+        }
+
+        $version = Get-ComsolVersionFromUser
+        $installDir = Get-ComsolInstallDirectoryForVersion -VersionText $version
+        $mode = Get-InstallModeFromTwoButtonPrompt
+
+        return [pscustomobject]@{
+            Action        = "ManualOverride"
+            InstallerPath = Get-NativeFileSystemPath -Path $ManualInstallerPath
+            VersionText   = $version
+            InstallDir    = $installDir
+            InstallMode   = $mode
+        }
+    }
+
+    $networkRoot = Get-GuiNetworkRoot
+    $action = Show-ComsolWorkflowPrompt -NetworkRoot $networkRoot
+
+    switch ($action) {
+        "Express64Install" {
+            if ([string]::IsNullOrWhiteSpace($networkRoot)) {
+                throw "Express COMSOL 6.4 install requires a GUI network root."
+            }
+
+            $candidatePath = Join-Path -Path $networkRoot -ChildPath $script:Comsol64NetworkRelativeSetupPath
+
+            if (-not (Test-ComsolSetupExe -Path $candidatePath)) {
+                throw "Express COMSOL 6.4 setup.exe was not found from the GUI network root."
+            }
+
+            return [pscustomObject]@{
+                Action        = "Express64Install"
+                InstallerPath = Get-NativeFileSystemPath -Path $candidatePath
+                VersionText   = $script:Comsol64VersionText
+                InstallDir    = $script:Comsol64InstallDir
+                InstallMode   = "install"
+            }
+        }
+
+        "Express64Uninstall" {
+            if ([string]::IsNullOrWhiteSpace($networkRoot)) {
+                throw "Express COMSOL 6.4 uninstall requires a GUI network root."
+            }
+
+            $candidatePath = Join-Path -Path $networkRoot -ChildPath $script:Comsol64NetworkRelativeSetupPath
+
+            if (-not (Test-ComsolSetupExe -Path $candidatePath)) {
+                throw "Express COMSOL 6.4 setup.exe was not found from the GUI network root."
+            }
+
+            return [pscustomObject]@{
+                Action        = "Express64Uninstall"
+                InstallerPath = Get-NativeFileSystemPath -Path $candidatePath
+                VersionText   = $script:Comsol64VersionText
+                InstallDir    = $script:Comsol64InstallDir
+                InstallMode   = "uninstall"
+            }
+        }
+
+        "NetworkPick" {
+            $selectedSetup = Select-ComsolSetupFromNetworkRoot -NetworkRoot $networkRoot
+            $version = Get-ComsolVersionFromUser
+            $installDir = Get-ComsolInstallDirectoryForVersion -VersionText $version
+            $mode = Get-InstallModeFromTwoButtonPrompt
+
+            return [pscustomObject]@{
+                Action        = "NetworkPick"
+                InstallerPath = $selectedSetup
+                VersionText   = $version
+                InstallDir    = $installDir
+                InstallMode   = $mode
+            }
+        }
+
+        "NoNetworkPick" {
+            $selectedSetup = Select-ComsolSetupWithoutNetworkRoot
+            $version = Get-ComsolVersionFromUser
+            $installDir = Get-ComsolInstallDirectoryForVersion -VersionText $version
+            $mode = Get-InstallModeFromTwoButtonPrompt
+
+            return [pscustomObject]@{
+                Action        = "NoNetworkPick"
+                InstallerPath = $selectedSetup
+                VersionText   = $version
+                InstallDir    = $installDir
+                InstallMode   = $mode
+            }
+        }
+
+        default {
+            throw "COMSOL action selection was cancelled."
+        }
     }
 }
 
@@ -620,9 +989,13 @@ function Set-ConfigValue {
         [Parameter(Mandatory = $true)]
         [string]$Key,
 
-        [Parameter(Mandatory = $true)]
-        [string]$Value
+        [AllowEmptyString()]
+        [string]$Value = ""
     )
+
+    if ($null -eq $Value) {
+        $Value = ""
+    }
 
     $escapedKey = [regex]::Escape($Key)
     $pattern = "(?m)^\s*$escapedKey\s*=.*$"
@@ -695,9 +1068,23 @@ function New-ComsolSetupConfig {
 
     $config = Set-ConfigValue -ConfigText $config -Key "installdir"  -Value $Settings.InstallDir
     $config = Set-ConfigValue -ConfigText $config -Key "installmode" -Value $Settings.InstallMode
-    $config = Set-ConfigValue -ConfigText $config -Key "license"     -Value $Settings.License
-    $config = Set-ConfigValue -ConfigText $config -Key "name"        -Value $Settings.Name
-    $config = Set-ConfigValue -ConfigText $config -Key "company"     -Value $Settings.Company
+
+    if ($Settings.InstallMode -eq "install") {
+        $config = Set-ConfigValue -ConfigText $config -Key "license"     -Value $Settings.License
+        $config = Set-ConfigValue -ConfigText $config -Key "name"        -Value $Settings.Name
+        $config = Set-ConfigValue -ConfigText $config -Key "company"     -Value $Settings.Company
+        $config = Set-ConfigValue -ConfigText $config -Key "licno"       -Value $Settings.LicenseNo
+    }
+    else {
+        # For uninstall, only installdir and installmode matter. Blank license/user-specific fields.
+        $config = Set-ConfigValue -ConfigText $config -Key "license"     -Value ""
+        $config = Set-ConfigValue -ConfigText $config -Key "name"        -Value ""
+        $config = Set-ConfigValue -ConfigText $config -Key "company"     -Value ""
+        $config = Set-ConfigValue -ConfigText $config -Key "licno"       -Value ""
+    }
+
+    # Leave lictype blank by design.
+    $config = Set-ConfigValue -ConfigText $config -Key "lictype" -Value ""
 
     # Keep terminal output enabled.
     $config = Set-ConfigValue -ConfigText $config -Key "quiet" -Value "0"
@@ -718,27 +1105,6 @@ function New-ComsolSetupConfig {
 # Process capture
 # ==========================
 
-function ConvertTo-ProcessArgumentString {
-    param(
-        [string[]]$Arguments
-    )
-
-    $quoted = foreach ($arg in $Arguments) {
-        if ($null -eq $arg) {
-            continue
-        }
-
-        if ($arg -match '^[A-Za-z0-9_\-\.\\/:@=]+$') {
-            $arg
-        }
-        else {
-            '"' + ($arg -replace '"', '\"') + '"'
-        }
-    }
-
-    return ($quoted -join " ")
-}
-
 function Invoke-ProcessWithGuiOutput {
     param(
         [Parameter(Mandatory = $true)]
@@ -751,86 +1117,205 @@ function Invoke-ProcessWithGuiOutput {
         [string]$OutputLogPath
     )
 
-    if (Test-Path -LiteralPath $OutputLogPath -PathType Leaf) {
-        Remove-Item -LiteralPath $OutputLogPath -Force
+    $debugLogPath = Join-Path $script:TempDir "comsol_launch_debug.log"
+
+    function Write-LaunchDebug {
+        param([string]$Message)
+
+        $stamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+        $line = "$stamp [LAUNCH DEBUG] $Message"
+
+        try { Add-Content -LiteralPath $debugLogPath -Value $line } catch {}
+        try { Add-Content -LiteralPath $script:WrapperLogPath -Value $line } catch {}
     }
 
-    $argString = ConvertTo-ProcessArgumentString -Arguments $Arguments
-
-    Write-GuiLog -Message "Launching COMSOL installer process."
-    Write-GuiLog -Message "Installer output log will be kept."
-
-    $psi = New-Object System.Diagnostics.ProcessStartInfo
-    $psi.FileName = $FilePath
-    $psi.Arguments = $argString
-    $psi.UseShellExecute = $false
-    $psi.RedirectStandardOutput = $true
-    $psi.RedirectStandardError = $true
-    $psi.CreateNoWindow = $true
-
-    $process = New-Object System.Diagnostics.Process
-    $process.StartInfo = $psi
-    $process.EnableRaisingEvents = $true
-
-    $process.add_OutputDataReceived({
-        param($sender, $eventArgs)
-
-        if ($null -ne $eventArgs.Data -and $eventArgs.Data.Trim() -ne "") {
-          $displayLine = "[COMSOL STDOUT] $($eventArgs.Data)"
-          $stamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-          $fileLine = "$stamp $displayLine"
-      
-          [Console]::Out.WriteLine($displayLine)
-          [Console]::Out.Flush()
-      
-          Add-Content -Path $script:InstallerOutputLogPath -Value $fileLine
-          Add-Content -Path $script:WrapperLogPath -Value $fileLine
-      }
-    })
-
-    $process.add_ErrorDataReceived({
-        param($sender, $eventArgs)
-
-        if ($null -ne $eventArgs.Data -and $eventArgs.Data.Trim() -ne "") {
-          $displayLine = "[COMSOL STDERR] $($eventArgs.Data)"
-          $stamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-          $fileLine = "$stamp $displayLine"
-      
-          [Console]::Out.WriteLine($displayLine)
-          [Console]::Out.Flush()
-      
-          Add-Content -Path $script:InstallerOutputLogPath -Value $fileLine
-          Add-Content -Path $script:WrapperLogPath -Value $fileLine
-      }
-    })
-
-    [void]$process.Start()
-
-    $process.BeginOutputReadLine()
-    $process.BeginErrorReadLine()
-
-    Write-GuiLog -Message "COMSOL installer is running." -Percent 65
-
-    $lastProgressTime = Get-Date
-
-    while (-not $process.HasExited) {
-        Start-Sleep -Seconds 2
-
-        $now = Get-Date
-        if (($now - $lastProgressTime).TotalSeconds -ge 20) {
-            Write-GuiLog -Message "COMSOL installer still running." -Percent 70
-            $lastProgressTime = $now
+    try {
+        if (Test-Path -LiteralPath $OutputLogPath -PathType Leaf) {
+            Remove-Item -LiteralPath $OutputLogPath -Force
         }
+
+        if (Test-Path -LiteralPath $debugLogPath -PathType Leaf) {
+            Remove-Item -LiteralPath $debugLogPath -Force
+        }
+
+        Write-LaunchDebug "Entered Invoke-ProcessWithGuiOutput."
+
+        if ([string]::IsNullOrWhiteSpace($FilePath)) {
+            throw "Installer FilePath is blank before launch."
+        }
+
+        if (-not (Test-Path -LiteralPath $FilePath -PathType Leaf)) {
+            throw "setup.exe could not be found before launch."
+        }
+
+        $nativeSetupExe = Get-NativeFileSystemPath -Path $FilePath
+        $setupExeName = Split-Path -Path $nativeSetupExe -Leaf
+        $setupRoot = Split-Path -Path $nativeSetupExe -Parent
+
+        Write-LaunchDebug "nativeSetupExe: $nativeSetupExe"
+        Write-LaunchDebug "setupExeName: $setupExeName"
+        Write-LaunchDebug "setupRoot: $setupRoot"
+
+        if ($setupExeName -ne "setup.exe") {
+            throw "Installer file must be named setup.exe."
+        }
+
+        if ([string]::IsNullOrWhiteSpace($setupRoot) -or -not (Test-Path -LiteralPath $setupRoot -PathType Container)) {
+            throw "Installer root folder could not be resolved."
+        }
+
+        $setupConfigPath = ""
+        if ($Arguments.Count -ge 2) {
+            $setupConfigPath = $Arguments[1]
+        }
+
+        if ([string]::IsNullOrWhiteSpace($setupConfigPath)) {
+            throw "setupconfig.ini path was blank before launch."
+        }
+
+        if (-not (Test-Path -LiteralPath $setupConfigPath -PathType Leaf)) {
+            throw "setupconfig.ini could not be found before launch."
+        }
+
+        $nativeSetupConfig = Get-NativeFileSystemPath -Path $setupConfigPath
+
+        Write-LaunchDebug "nativeSetupConfig: $nativeSetupConfig"
+        Write-LaunchDebug "Validated setup.exe and setupconfig.ini."
+
+        Write-GuiLog -Message "Launching COMSOL installer process."
+        Write-GuiLog -Message "Running setup.exe from installer root."
+        Write-GuiLog -Message "Installer output log will be kept."
+
+        $safeSetupRoot = $setupRoot.Replace("'", "''")
+        $safeSetupConfigPath = $nativeSetupConfig.Replace("'", "''")
+
+        $command = @"
+`$ErrorActionPreference = 'Stop'
+
+Write-Output "COMSOL launch script started."
+Write-Output "Starting location: `$((Get-Location).Path)"
+Write-Output "Setup root exists: `$((Test-Path -LiteralPath '$safeSetupRoot' -PathType Container))"
+Write-Output "Setupconfig exists: `$((Test-Path -LiteralPath '$safeSetupConfigPath' -PathType Leaf))"
+
+Push-Location -LiteralPath '$safeSetupRoot'
+
+try {
+    Write-Output "COMSOL launch cwd: `$((Get-Location).Path)"
+    Write-Output "COMSOL launch command: .\setup.exe -s <setupconfig.ini>"
+
+    & .\setup.exe -s '$safeSetupConfigPath'
+
+    `$exitCode = `$LASTEXITCODE
+
+    if (`$null -eq `$exitCode) {
+        `$exitCode = 0
     }
 
-    $process.WaitForExit()
+    Write-Output "COMSOL setup.exe returned exit code: `$exitCode"
+    exit `$exitCode
+}
+finally {
+    Pop-Location
+}
+"@
 
-    Start-Sleep -Milliseconds 500
+        $encodedCommand = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($command))
 
-    $exitCode = $process.ExitCode
-    $process.Dispose()
+        $psi = New-Object System.Diagnostics.ProcessStartInfo
+        $psi.FileName = "powershell.exe"
+        $psi.Arguments = "-NoProfile -ExecutionPolicy Bypass -EncodedCommand $encodedCommand"
+        $psi.WorkingDirectory = $script:TempDir
+        $psi.UseShellExecute = $false
+        $psi.RedirectStandardOutput = $true
+        $psi.RedirectStandardError = $true
+        $psi.CreateNoWindow = $true
 
-    return $exitCode
+        Write-LaunchDebug "ProcessStartInfo created."
+        Write-LaunchDebug "psi.FileName: $($psi.FileName)"
+        Write-LaunchDebug "psi.WorkingDirectory: $($psi.WorkingDirectory)"
+        Write-LaunchDebug "psi.UseShellExecute: $($psi.UseShellExecute)"
+
+        $process = New-Object System.Diagnostics.Process
+        $process.StartInfo = $psi
+        $process.EnableRaisingEvents = $true
+
+        $process.add_OutputDataReceived({
+            param($sender, $eventArgs)
+
+            if ($null -ne $eventArgs -and $null -ne $eventArgs.Data -and $eventArgs.Data.Trim() -ne "") {
+                $displayLine = "[COMSOL STDOUT] $($eventArgs.Data)"
+                $stamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+                $fileLine = "$stamp $displayLine"
+
+                [Console]::Out.WriteLine($displayLine)
+                [Console]::Out.Flush()
+
+                Add-Content -Path $script:InstallerOutputLogPath -Value $fileLine
+                Add-Content -Path $script:WrapperLogPath -Value $fileLine
+            }
+        })
+
+        $process.add_ErrorDataReceived({
+            param($sender, $eventArgs)
+
+            if ($null -ne $eventArgs -and $null -ne $eventArgs.Data -and $eventArgs.Data.Trim() -ne "") {
+                $displayLine = "[COMSOL STDERR] $($eventArgs.Data)"
+                $stamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+                $fileLine = "$stamp $displayLine"
+
+                [Console]::Out.WriteLine($displayLine)
+                [Console]::Out.Flush()
+
+                Add-Content -Path $script:InstallerOutputLogPath -Value $fileLine
+                Add-Content -Path $script:WrapperLogPath -Value $fileLine
+            }
+        })
+
+        Write-LaunchDebug "Starting child PowerShell process."
+
+        $started = $process.Start()
+        Write-LaunchDebug "process.Start() returned: $started"
+
+        if (-not $started) {
+            throw "Child PowerShell process did not start."
+        }
+
+        $process.BeginOutputReadLine()
+        $process.BeginErrorReadLine()
+
+        Write-GuiLog -Message "COMSOL installer is running." -Percent 65
+
+        $lastProgressTime = Get-Date
+
+        while (-not $process.HasExited) {
+            Start-Sleep -Seconds 2
+
+            $now = Get-Date
+            if (($now - $lastProgressTime).TotalSeconds -ge 20) {
+                Write-GuiLog -Message "COMSOL installer still running." -Percent 70
+                $lastProgressTime = $now
+            }
+
+            try { $process.Refresh() } catch {}
+        }
+
+        $process.WaitForExit()
+        Start-Sleep -Milliseconds 500
+
+        $exitCode = $process.ExitCode
+        Write-LaunchDebug "Final child PowerShell exit code: $exitCode"
+
+        $process.Dispose()
+
+        return $exitCode
+    }
+    catch {
+        Write-LaunchDebug "ERROR in Invoke-ProcessWithGuiOutput: $($_.Exception.Message)"
+        throw
+    }
+    finally {
+        Write-GuiLog -Message "COMSOL launch debug log kept at: $debugLogPath"
+    }
 }
 
 function Handle-ComsolExitCode {
@@ -842,16 +1327,16 @@ function Handle-ComsolExitCode {
 
     switch ($ExitCode) {
         0 {
-            Write-GuiLog -Message "COMSOL installation completed successfully." -Percent 100
+            Write-GuiLog -Message "COMSOL installer completed successfully." -Percent 100
         }
         1 {
-            Write-GuiLog -Message "COMSOL completed with at least one warning. Check logs." -Percent 100 -Level "WARN"
+            Write-GuiLog -Message "COMSOL installer completed with at least one warning. Check logs." -Percent 100 -Level "WARN"
         }
         2 {
-            Write-GuiLog -Message "COMSOL completed with at least one error. Exit code 2." -Percent 100 -Level "ERROR"
+            Write-GuiLog -Message "COMSOL installer completed with at least one error. Exit code 2." -Percent 100 -Level "ERROR"
         }
         3 {
-            Write-GuiLog -Message "COMSOL completed with at least one fatal error. Exit code 3." -Percent 100 -Level "ERROR"
+            Write-GuiLog -Message "COMSOL installer completed with at least one fatal error. Exit code 3." -Percent 100 -Level "ERROR"
         }
         4 {
             Write-GuiLog -Message "COMSOL installer exited before installation completed. Exit code 4." -Percent 100 -Level "ERROR"
@@ -873,7 +1358,7 @@ try {
         Remove-Item -LiteralPath $script:WrapperLogPath -Force
     }
 
-    Write-GuiLog -Message "Starting CHEN COMSOL 6.4 installer wrapper." -Percent 1
+    Write-GuiLog -Message "Starting CHEN COMSOL installer wrapper." -Percent 1
 
     $apartment = [System.Threading.Thread]::CurrentThread.GetApartmentState()
     if ($apartment -ne "STA") {
@@ -884,14 +1369,21 @@ try {
         Write-GuiLog -Message "PowerShell is not running as Administrator. COMSOL may fail if system-level changes are required." -Percent 2 -Level "WARN"
     }
 
-    $resolvedInstallerPath = Resolve-ComsolInstallerPath `
-        -ManualInstallerPath $InstallerPath
+    $workflow = Get-ComsolWorkflow -ManualInstallerPath $InstallerPath
 
-    Write-GuiLog -Message "COMSOL installer resolved." -Percent 8
+    Write-GuiLog -Message "COMSOL installer source selected." -Percent 8
+    Write-GuiLog -Message "Selected action: $($workflow.Action)"
+    Write-GuiLog -Message "Selected mode: $($workflow.InstallMode)"
+    Write-GuiLog -Message "Selected COMSOL version: $($workflow.VersionText)"
 
-    $settings = Get-ComsolSettings
+    $settings = Get-ComsolInstallDetails -Workflow $workflow
 
-    Write-GuiLog -Message "COMSOL setup values received. Sensitive values will not be logged."
+    if ($settings.InstallMode -eq "install") {
+        Write-GuiLog -Message "COMSOL install values received. Sensitive values will not be logged."
+    }
+    else {
+        Write-GuiLog -Message "COMSOL uninstall selected. License/user prompts skipped."
+    }
 
     New-ComsolSetupConfig `
         -Settings $settings `
@@ -902,8 +1394,14 @@ try {
         $message = @"
 COMSOL installer is ready to run.
 
+Mode:
+$($settings.InstallMode)
+
+Install Directory:
+$($settings.InstallDir)
+
 Temporary setupconfig.ini was generated in C:\Temp.
-Sensitive values are not displayed here.
+Sensitive license values are not displayed here.
 
 Run installer now?
 "@
@@ -919,7 +1417,7 @@ Run installer now?
     Write-GuiLog -Message "Launching COMSOL installer." -Percent 60
 
     $exitCode = Invoke-ProcessWithGuiOutput `
-        -FilePath $resolvedInstallerPath `
+        -FilePath $workflow.InstallerPath `
         -Arguments @("-s", $script:FinalConfigPath) `
         -OutputLogPath $script:InstallerOutputLogPath
 
@@ -944,9 +1442,7 @@ catch {
 }
 finally {
     Write-GuiLog -Message "Cleaning up temporary setupconfig files."
-
     Remove-ComsolTempFiles
-
     Write-GuiLog -Message "Cleanup finished."
     Write-GuiLog -Message "Wrapper log kept at: $script:WrapperLogPath"
     Write-GuiLog -Message "Installer output log kept at: $script:InstallerOutputLogPath"
