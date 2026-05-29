@@ -23,7 +23,7 @@
   {
     "name": "COMSOL Un/Installer",
     "scriptType": "powershell",
-    "scriptPath": "powershell/COMSOL64/COMSOL_installer.ps1",
+    "scriptPath": "powershell/COMSOL/COMSOL_installer.ps1",
     "arguments": "",
     "enabled": true
   }
