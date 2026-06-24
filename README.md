@@ -13,6 +13,7 @@ CHEN-Installer-Source/
 │   ├── common.ps1
 │   ├── fiji_installer.ps1
 │   ├── fiji_uninstaller.ps1
+│   ├── git_installer.ps1
 │   ├── matlab_installer.ps1
 │   ├── python_manager.ps1
 │   └── COMSOL/
@@ -32,7 +33,7 @@ The root `installers.json` file controls which installers appear in the CHEN Ins
 | `arguments` | Optional command-line arguments passed to the script. |
 | `enabled` | Whether the installer should appear in the GUI. |
 
-Current installer entries include:
+Current installer entries:
 
 ```json
 [
@@ -70,6 +71,13 @@ Current installer entries include:
     "scriptPath": "powershell/python_manager.ps1",
     "arguments": "",
     "enabled": true
+  },
+  {
+    "name": "Git Installer",
+    "scriptType": "powershell",
+    "scriptPath": "powershell/git_installer.ps1",
+    "arguments": "",
+    "enabled": true
   }
 ]
 ```
@@ -96,6 +104,82 @@ Example:
 ```powershell
 $ScriptDirectory = Split-Path -Parent $MyInvocation.MyCommand.Definition
 . (Join-Path $ScriptDirectory "common.ps1")
+```
+
+## Progress Output Format
+
+Installer scripts should report progress using the shared `Send-GuiProgress` function when possible. This keeps the CHEN Installer GUI informed about the current step and completion percentage.
+
+Example:
+
+```powershell
+Send-GuiProgress -Percent 50 -Message "Installing Python 3.14..."
+```
+
+`Send-GuiProgress` writes progress messages in this format:
+
+```text
+CHEN_PROGRESS|<percent>|<message>
+```
+
+Normal `Write-Host`, Chocolatey output, and script output should still appear in the main GUI terminal.
+
+## Git Installer
+
+`powershell/git_installer.ps1` installs or upgrades Git for Windows using Chocolatey. It does not open its own GUI, so output stays visible in the main CHEN Installer GUI terminal.
+
+### Requirements
+
+- Windows
+- PowerShell 5.1 or newer
+- Administrator rights
+- Chocolatey installed and available as `choco.exe`
+- `powershell/common.ps1` in the same folder as `git_installer.ps1`
+
+The main CHEN Installer GUI should be launched as Administrator before running this installer. The script intentionally does not self-elevate because spawning a separate elevated process can break terminal output capture in the parent GUI.
+
+### Behavior
+
+The Git installer:
+
+- loads `powershell/common.ps1`
+- checks for Administrator rights
+- checks that Chocolatey is available
+- installs Git with Chocolatey if it is missing
+- upgrades Git with Chocolatey if it is already installed
+- adds `C:\Program Files\Git\cmd` to the machine-level `Path` if needed
+- verifies the install by running `git --version`
+- sends progress updates to the CHEN GUI progress bar
+- writes normal status and Chocolatey output to the CHEN GUI terminal
+
+### Chocolatey Command Used
+
+Install or upgrade pattern:
+
+```powershell
+choco install git -y --no-progress --execution-timeout=2700
+choco upgrade git -y --no-progress --execution-timeout=2700
+```
+
+If a custom Chocolatey source is needed, the script supports:
+
+```powershell
+.\powershell\git_installer.ps1 -ChocolateySource "https://your-choco-source.example/api/v2/"
+```
+
+### Manual Test
+
+From the repository root on a Windows machine running as Administrator:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\powershell\git_installer.ps1
+```
+
+After install, open a new terminal and check:
+
+```powershell
+git --version
+where git
 ```
 
 ## Python Version Manager
@@ -198,26 +282,7 @@ For troubleshooting elevation behavior, the script also supports:
 .\powershell\python_manager.ps1 -NoSelfElevate
 ```
 
-## Progress Output Format
-
-Installer scripts should report progress using the shared `Send-GuiProgress` function when possible. This keeps the CHEN Installer GUI informed about the current step and completion percentage.
-
-Example:
-
-```powershell
-Send-GuiProgress -Percent 50 -Message "Installing Python 3.14..."
-```
-
-## Development Notes
-
-- Keep installer scripts idempotent when possible.
-- Prefer predictable install folders for software that must be managed later.
-- Avoid silently changing system-wide settings unless the GUI label clearly says what will happen.
-- When editing the machine-level `Path`, preserve unrelated existing entries.
-- If an installer requires Administrator rights, check early and fail clearly or self-elevate.
-- Keep `installers.json` paths relative to the repository root.
-
-## Basic Local Test Flow
+### Manual Test
 
 From the repository root on a Windows machine:
 
@@ -240,3 +305,44 @@ where pip
 ```
 
 5. Use `Remove Selected From PATH` or `Remove ALL Managed Python PATH Entries` if the default needs to be reset.
+
+## Development Notes
+
+- Keep installer scripts idempotent when possible.
+- Prefer predictable install folders for software that must be managed later.
+- Avoid silently changing system-wide settings unless the GUI label clearly says what will happen.
+- When editing the machine-level `Path`, preserve unrelated existing entries.
+- If an installer requires Administrator rights, check early and fail clearly or self-elevate only when parent GUI output capture will not be affected.
+- Keep `installers.json` paths relative to the repository root.
+
+## Recommended Line Ending Rules
+
+This repo is edited from Windows, so adding a `.gitattributes` file is recommended to avoid Git line-ending warnings.
+
+```gitattributes
+* text=auto
+
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.json text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+
+*.zip binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.ico binary
+*.exe binary
+*.dll binary
+```
+
+After adding or editing `.gitattributes`, run:
+
+```powershell
+git add .gitattributes
+git add --renormalize .
+git status
+```

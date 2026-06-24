@@ -33,5 +33,12 @@
     "scriptPath": "powershell/python_manager.ps1",
     "arguments": "",
     "enabled": true
+  },
+  {
+  "name": "Git Installer",
+  "scriptType": "powershell",
+  "scriptPath": "powershell/git_installer.ps1",
+  "arguments": "",
+  "enabled": true
   }
 ]
