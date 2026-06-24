@@ -26,5 +26,12 @@
     "scriptPath": "powershell/COMSOL/COMSOL_installer.ps1",
     "arguments": "",
     "enabled": true
+  },
+  {
+    "name": "Python Version Manager",
+    "scriptType": "powershell",
+    "scriptPath": "powershell/python_manager.ps1",
+    "arguments": "",
+    "enabled": true
   }
 ]
