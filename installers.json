@@ -47,5 +47,12 @@
     "scriptPath": "powershell/office2024_ptb_installer.ps1",
     "arguments": "",
     "enabled": true
+  },
+  {
+    "name": "PDFgear Installer",
+    "scriptType": "powershell",
+    "scriptPath": "powershell/pdfgear_installer.ps1",
+    "arguments": "",
+    "enabled": true
   }
 ]
