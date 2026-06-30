@@ -1,6 +1,13 @@
 <#
 CHEN PDFgear Installer
 
+Place this file at:
+  powershell/pdfgear_installer.ps1
+
+Requires:
+  powershell/common.ps1 in the same folder
+  Chocolatey installed and available as choco.exe
+
 Purpose:
   Installs or upgrades PDFgear for all users through Chocolatey.
   This script intentionally does not open its own GUI so the parent CHEN Installer
