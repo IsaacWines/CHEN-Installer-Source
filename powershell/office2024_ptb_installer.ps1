@@ -73,8 +73,8 @@ function Join-NetworkPath {
     return Join-Path $cleanRoot $cleanRelative
 }
 
-$OfficeSetupRelativePath = "\software\Microsoft\Software\Office\Windows\Office 2024\PTB\setup.exe"
-$OfficeConfigRelativePath = "\software\Microsoft\Software\Office\Windows\Office 2024\PTB\Office-24-x64.xml"
+$OfficeSetupRelativePath = "support\software\Microsoft\Software\Office\Windows\Office 2024\PTB\setup.exe"
+$OfficeConfigRelativePath = "support\software\Microsoft\Software\Office\Windows\Office 2024\PTB\Office-24-x64.xml"
 $SuccessExitCodes = @(0, 3010)
 
 try {
