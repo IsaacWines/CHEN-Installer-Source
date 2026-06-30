@@ -1,227 +1,196 @@
 <#
 CHEN PDFgear Installer
 
-Place this file at:
-  powershell/pdfgear_installer.ps1
-
-Requires:
-  powershell/common.ps1 in the same folder
-  Chocolatey installed and available as choco.exe
-
 Purpose:
-  Installs or upgrades PDFgear for all users through Chocolatey.
-  This script intentionally does not open its own GUI so the parent CHEN Installer
-  GUI can capture terminal output and CHEN_PROGRESS messages.
+  Installs or upgrades PDFgear through Chocolatey.
+  No GUI is opened by this script.
+  Output is written to the parent CHEN Installer terminal.
+  Progress is sent using CHEN_PROGRESS through common.ps1.
+
+Important:
+  This script intentionally does NOT inspect the Windows uninstall registry.
+  It does NOT use DisplayName.
+  It does NOT create shortcuts.
+  It does NOT try to manually detect PDFgear through Program Files.
 #>
 
 [CmdletBinding()]
 param(
-    # Optional Chocolatey source. Leave blank to use the machine's configured Chocolatey sources.
-    [string]$ChocolateySource = "",
-
-    # Creates a shortcut on the Public Desktop when PDFgear is found after install.
-    [bool]$CreatePublicDesktopShortcut = $true
+    [string]$ChocolateySource = ""
 )
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = "Stop"
 
-# ======================================================================================
-# Load shared CHEN helper functions
-# ======================================================================================
 $ScriptDirectory = Split-Path -Parent $MyInvocation.MyCommand.Definition
 $CommonScriptPath = Join-Path $ScriptDirectory "common.ps1"
 
-if (-not (Test-Path $CommonScriptPath)) {
-    [Console]::Out.WriteLine("CHEN_PROGRESS|0|common.ps1 was not found next to pdfgear_installer.ps1.")
+if (-not (Test-Path $CommonScriptPath -PathType Leaf)) {
+    [Console]::Out.WriteLine("CHEN_PROGRESS|100|PDFgear installer failed.")
     [Console]::Out.Flush()
-    Write-Error "common.ps1 was not found next to this script. Expected: $CommonScriptPath"
+    Write-Host "ERROR: common.ps1 was not found next to pdfgear_installer.ps1."
+    Write-Host "Expected: $CommonScriptPath"
     exit 1
 }
 
 . $CommonScriptPath
 
-# Chocolatey enhanced exit codes:
-# 0 = success, 1605 = already uninstalled, 1614 = product uninstalled,
-# 1641/3010 = success but reboot required.
+$PackageName = "pdfgear"
+
+# Chocolatey success codes:
+# 0    = success
+# 1605 = product already uninstalled
+# 1614 = product uninstalled
+# 1641 = success, reboot initiated
+# 3010 = success, reboot required
 $ValidChocolateyExitCodes = @(0, 1605, 1614, 1641, 3010)
 
-function Write-Step {
+function Set-ChenProgress {
     param(
         [int]$Percent,
         [string]$Message
     )
 
     Send-GuiProgress -Percent $Percent -Message $Message
+}
+
+function Write-ChenLog {
+    param(
+        [string]$Message = ""
+    )
+
     Write-Host $Message
 }
 
-function Get-ChocoCommandPath {
-    $command = Get-Command choco.exe -ErrorAction SilentlyContinue
+function Get-ChocoPath {
+    $command = Get-Command "choco.exe" -ErrorAction SilentlyContinue
 
-    if ($null -ne $command) {
+    if ($null -ne $command -and -not [string]::IsNullOrWhiteSpace($command.Source)) {
         return $command.Source
     }
 
-    $defaultPath = Join-Path $env:ProgramData "chocolatey\bin\choco.exe"
-    if (Test-Path $defaultPath -PathType Leaf) {
-        return $defaultPath
+    $fallbackPath = Join-Path $env:ProgramData "chocolatey\bin\choco.exe"
+
+    if (Test-Path $fallbackPath -PathType Leaf) {
+        return $fallbackPath
     }
 
     return ""
 }
 
-function Test-PDFgearInstalled {
-    $uninstallRoots = @(
-        "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
-        "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"
+function Test-ChocoPackageInstalled {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ChocoPath,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Name
     )
 
-    foreach ($root in $uninstallRoots) {
-        if (-not (Test-Path $root)) {
-            continue
-        }
+    $output = & $ChocoPath list --local-only --exact $Name --limit-output 2>$null
+    $exitCode = $LASTEXITCODE
 
-        $match = Get-ChildItem $root -ErrorAction SilentlyContinue |
-            ForEach-Object { Get-ItemProperty $_.PsPath -ErrorAction SilentlyContinue } |
-            Where-Object { $_.DisplayName -like "PDFgear*" } |
-            Select-Object -First 1
-
-        if ($null -ne $match) {
-            return $true
-        }
+    if ($exitCode -ne 0) {
+        return $false
     }
 
-    if (Test-Path (Join-Path $env:ProgramFiles "PDFgear") -PathType Container) {
-        return $true
+    foreach ($line in @($output)) {
+        if ($line -match "^$([regex]::Escape($Name))\|") {
+            return $true
+        }
     }
 
     return $false
 }
 
-function Get-PDFgearExecutablePath {
-    $installDir = Join-Path $env:ProgramFiles "PDFgear"
-
-    $candidatePaths = @(
-        (Join-Path $installDir "PDFLauncher.exe"),
-        (Join-Path $installDir "PDFgear.exe")
-    )
-
-    foreach ($candidate in $candidatePaths) {
-        if (Test-Path $candidate -PathType Leaf) {
-            return $candidate
-        }
-    }
-
-    if (Test-Path $installDir -PathType Container) {
-        $exe = Get-ChildItem -Path $installDir -Filter "*.exe" -File -ErrorAction SilentlyContinue |
-            Where-Object { $_.Name -match "PDF|Launcher|gear" } |
-            Sort-Object Name |
-            Select-Object -First 1
-
-        if ($null -ne $exe) {
-            return $exe.FullName
-        }
-    }
-
-    return ""
-}
-
-function Ensure-PublicDesktopShortcut {
-    $exePath = Get-PDFgearExecutablePath
-
-    if ([string]::IsNullOrWhiteSpace($exePath)) {
-        Write-Host "PDFgear executable was not found, so no Public Desktop shortcut was created."
-        return
-    }
-
-    $shortcutPath = Join-Path $env:PUBLIC "Desktop\PDFgear.lnk"
-
-    if (Test-Path $shortcutPath -PathType Leaf) {
-        Write-Host "Public Desktop shortcut already exists: $shortcutPath"
-        return
-    }
-
-    New-Shortcut -TargetPath $exePath -ShortcutPath $shortcutPath -Description "PDFgear PDF editor and reader"
-    Write-Host "Created Public Desktop shortcut: $shortcutPath"
-}
-
 try {
-    Write-Step -Percent 0 -Message "Starting PDFgear installer..."
+    Set-ChenProgress -Percent 0 -Message "Starting PDFgear installer..."
+
+    Write-ChenLog "Starting PDFgear installer."
+    Write-ChenLog "Script version: 2026-06-30-simple-choco-only"
+    Write-ChenLog ""
 
     if (-not (Test-IsAdmin)) {
-        throw "This installer must be run from an elevated/admin CHEN Installer GUI so PDFgear installs for all users. Please restart the main GUI as Administrator."
+        throw "The CHEN Installer GUI must be run as Administrator before installing PDFgear."
     }
 
-    Write-Step -Percent 10 -Message "Checking for Chocolatey..."
-    $chocoPath = Get-ChocoCommandPath
+    Set-ChenProgress -Percent 10 -Message "Checking for Chocolatey..."
+    Write-ChenLog "Checking for Chocolatey..."
+
+    $chocoPath = Get-ChocoPath
 
     if ([string]::IsNullOrWhiteSpace($chocoPath)) {
         throw "choco.exe was not found. Install Chocolatey first, then run this installer again."
     }
 
-    Write-Host "Chocolatey path: $chocoPath"
+    Write-ChenLog "Chocolatey path: $chocoPath"
+    Write-ChenLog ""
 
-    $alreadyInstalled = Test-PDFgearInstalled
-    if ($alreadyInstalled) {
-        Write-Step -Percent 20 -Message "PDFgear is already installed. Running Chocolatey upgrade..."
+    Set-ChenProgress -Percent 20 -Message "Checking current Chocolatey package state..."
+
+    $wasInstalled = Test-ChocoPackageInstalled -ChocoPath $chocoPath -Name $PackageName
+
+    if ($wasInstalled) {
+        Write-ChenLog "Chocolatey package '$PackageName' is already installed. Running upgrade to make sure it is current."
     }
     else {
-        Write-Step -Percent 20 -Message "PDFgear is not installed. Running Chocolatey install..."
+        Write-ChenLog "Chocolatey package '$PackageName' is not installed. Running install through choco upgrade."
     }
 
-    $chocoArgs = @("upgrade", "pdfgear", "-y", "--no-progress")
+    $chocoArgs = @(
+        "upgrade",
+        $PackageName,
+        "-y",
+        "--no-progress"
+    )
 
     if (-not [string]::IsNullOrWhiteSpace($ChocolateySource)) {
         $chocoArgs += @("--source", $ChocolateySource)
-        Write-Host "Chocolatey source: $ChocolateySource"
+        Write-ChenLog "Chocolatey source override: $ChocolateySource"
     }
 
-    Write-Step -Percent 35 -Message "Installing PDFgear through Chocolatey..."
-    Write-Host ""
-    Write-Host "> `"$chocoPath`" $($chocoArgs -join ' ')"
-    Write-Host ""
+    Write-ChenLog ""
+    Write-ChenLog "Command:"
+    Write-ChenLog "`"$chocoPath`" $($chocoArgs -join ' ')"
+    Write-ChenLog ""
+
+    Set-ChenProgress -Percent 35 -Message "Installing PDFgear through Chocolatey..."
 
     & $chocoPath @chocoArgs
-    $exitCode = $LASTEXITCODE
+    $chocoExitCode = $LASTEXITCODE
 
-    Write-Host ""
-    Write-Host "Chocolatey exited with code: $exitCode"
+    Write-ChenLog ""
+    Write-ChenLog "Chocolatey exit code: $chocoExitCode"
 
-    if ($ValidChocolateyExitCodes -notcontains $exitCode) {
-        throw "Chocolatey failed while installing PDFgear. Exit code: $exitCode"
+    if ($ValidChocolateyExitCodes -notcontains $chocoExitCode) {
+        throw "Chocolatey failed while installing PDFgear. Exit code: $chocoExitCode."
     }
 
-    if ($exitCode -eq 3010 -or $exitCode -eq 1641) {
-        Write-Host "Chocolatey reported success, but Windows may need a restart."
+    if ($chocoExitCode -eq 1641 -or $chocoExitCode -eq 3010) {
+        Write-ChenLog "Chocolatey reported success, but Windows may require a restart."
     }
 
-    Write-Step -Percent 80 -Message "Verifying PDFgear installation..."
+    Set-ChenProgress -Percent 85 -Message "Verifying Chocolatey package registration..."
 
-    if (-not (Test-PDFgearInstalled)) {
-        throw "Chocolatey finished, but PDFgear could not be detected in HKLM uninstall registry or Program Files."
+    $isInstalled = Test-ChocoPackageInstalled -ChocoPath $chocoPath -Name $PackageName
+
+    if (-not $isInstalled) {
+        throw "Chocolatey completed, but '$PackageName' is not listed as a locally installed Chocolatey package."
     }
 
-    $pdfgearExe = Get-PDFgearExecutablePath
-    if (-not [string]::IsNullOrWhiteSpace($pdfgearExe)) {
-        Write-Host "PDFgear executable: $pdfgearExe"
-    }
-    else {
-        Write-Host "PDFgear install was detected, but the executable path could not be resolved automatically."
-    }
+    Write-ChenLog ""
+    Write-ChenLog "PDFgear is installed according to Chocolatey."
+    Write-ChenLog "Installer completed successfully."
 
-    if ($CreatePublicDesktopShortcut) {
-        Write-Step -Percent 90 -Message "Creating all-users desktop shortcut if needed..."
-        Ensure-PublicDesktopShortcut
-    }
-
-    Write-Step -Percent 100 -Message "PDFgear installed successfully for all users."
+    Set-ChenProgress -Percent 100 -Message "PDFgear installed successfully."
     exit 0
 }
 catch {
-    Send-GuiProgress -Percent 100 -Message "PDFgear installer failed."
-    Write-Host ""
-    Write-Host "ERROR: $($_.Exception.Message)"
-    Write-Host ""
+    Set-ChenProgress -Percent 100 -Message "PDFgear installer failed."
+
+    Write-ChenLog ""
+    Write-ChenLog "ERROR: $($_.Exception.Message)"
+    Write-ChenLog ""
+
     exit 1
 }
