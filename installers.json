@@ -35,10 +35,17 @@
     "enabled": true
   },
   {
-  "name": "Git Installer",
-  "scriptType": "powershell",
-  "scriptPath": "powershell/git_installer.ps1",
-  "arguments": "",
-  "enabled": true
+    "name": "Git Installer",
+    "scriptType": "powershell",
+    "scriptPath": "powershell/git_installer.ps1",
+    "arguments": "",
+    "enabled": true
+  },
+  {
+    "name": "Office 2024 PTB Installer",
+    "scriptType": "powershell",
+    "scriptPath": "powershell/office2024_ptb_installer.ps1",
+    "arguments": "",
+    "enabled": true
   }
 ]
