@@ -24,13 +24,13 @@ function Get-ChenMsiProperty {
     $installer = $null; $database = $null; $view = $null; $record = $null
     try {
         $installer = New-Object -ComObject WindowsInstaller.Installer
-        $database = $installer.GetType().InvokeMember('OpenDatabase', 'InvokeMethod', $null, $installer, @($Path, 0))
+        $database = $installer.OpenDatabase([string]$Path, [int]0)
         $query = "SELECT ``Value`` FROM ``Property`` WHERE ``Property`` = '$Property'"
-        $view = $database.GetType().InvokeMember('OpenView', 'InvokeMethod', $null, $database, @($query))
-        [void]$view.GetType().InvokeMember('Execute', 'InvokeMethod', $null, $view, $null)
-        $record = $view.GetType().InvokeMember('Fetch', 'InvokeMethod', $null, $view, $null)
+        $view = $database.OpenView([string]$query)
+        $view.Execute()
+        $record = $view.Fetch()
         if (-not $record) { throw "MSI property $Property is missing." }
-        return $record.GetType().InvokeMember('StringData', 'GetProperty', $null, $record, @(1))
+        return $record.StringData([int]1)
     }
     finally {
         foreach ($com in @($record, $view, $database, $installer)) {

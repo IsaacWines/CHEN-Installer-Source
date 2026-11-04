@@ -150,17 +150,17 @@ try {
             $installer = New-Object -ComObject WindowsInstaller.Installer
             $database = $null
             try {
-                $database = $installer.GetType().InvokeMember('OpenDatabase','InvokeMethod',$null,$installer,@($path,3))
+                $database = $installer.OpenDatabase([string]$path, [int]3)
                 foreach ($query in @(
                     'CREATE TABLE `Property` (`Property` CHAR(72) NOT NULL, `Value` CHAR(0) LOCALIZABLE PRIMARY KEY `Property`)',
                     "INSERT INTO ``Property`` (``Property``, ``Value``) VALUES ('ProductName', 'ArcGIS Pro')",
                     "INSERT INTO ``Property`` (``Property``, ``Value``) VALUES ('ProductVersion', '3.7.0')"
                 )) {
-                    $view = $database.GetType().InvokeMember('OpenView','InvokeMethod',$null,$database,@($query))
-                    try { [void]$view.GetType().InvokeMember('Execute','InvokeMethod',$null,$view,$null) }
+                    $view = $database.OpenView([string]$query)
+                    try { $view.Execute() }
                     finally { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($view) }
                 }
-                [void]$database.GetType().InvokeMember('Commit','InvokeMethod',$null,$database,$null)
+                $database.Commit()
             }
             finally {
                 if ($database) { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($database) }
