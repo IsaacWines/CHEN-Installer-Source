@@ -306,6 +306,24 @@ where pip
 
 5. Use `Remove Selected From PATH` or `Remove ALL Managed Python PATH Entries` if the default needs to be reset.
 
+## Craft App Suite and Optional Launcher
+
+The **Craft App Suite + Optional Launcher** entry opens a checklist for the apps
+listed on [CraftSuite](https://craftsuite.net/). An independent **Also install
+ArtCraft Launcher** checkbox offers a central place to open, install and update
+the Craft apps. It starts unchecked. You can install apps without the launcher,
+the launcher alone, or both in one run.
+
+This uses the [official ArtCraft Launcher](https://github.com/storytold/craft-launcher),
+including its native app discovery, launching and updates. It does not introduce
+a separate CHEN launcher to maintain. The existing CHEN Windows GUI reads
+`installers.json` and downloads this self-contained script, so **no changes or
+rebuild are needed in CHEN-Installers**. After this catalog entry is merged into
+`main`, click Refresh in the existing tool and select the new entry.
+
+See [CraftSuite installer instructions](docs/craftsuite-installer.md) for supported
+apps, command-line examples, install scopes, logs and the Windows acceptance checks.
+
 ## Development Notes
 
 - Keep installer scripts idempotent when possible.

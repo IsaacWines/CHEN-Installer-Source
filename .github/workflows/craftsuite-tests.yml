@@ -1,0 +1,26 @@
+name: CraftSuite installer checks
+on:
+  push:
+    paths: ['powershell/craftsuite_installer.ps1', 'tests/craftsuite.tests.ps1', 'installers.json', '.github/workflows/craftsuite-tests.yml']
+  pull_request:
+    paths: ['powershell/craftsuite_installer.ps1', 'tests/craftsuite.tests.ps1', 'installers.json', '.github/workflows/craftsuite-tests.yml']
+permissions:
+  contents: read
+jobs:
+  powershell:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Windows PowerShell 5.1 tests and catalog integration
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tokens = $null; $parseErrors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path 'powershell/craftsuite_installer.ps1'), [ref]$tokens, [ref]$parseErrors)
+          if ($parseErrors.Count) { throw ($parseErrors | Out-String) }
+          & ./tests/craftsuite.tests.ps1
+          $entry = @(Get-Content installers.json -Raw | ConvertFrom-Json | Where-Object scriptPath -eq 'powershell/craftsuite_installer.ps1')
+          if ($entry.Count -ne 1 -or -not $entry[0].enabled) { throw 'Missing CraftSuite installer entry.' }
+      - name: PowerShell 7 tests
+        shell: pwsh
+        run: ./tests/craftsuite.tests.ps1
