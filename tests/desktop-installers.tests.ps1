@@ -157,10 +157,10 @@ try {
                     "INSERT INTO ``Property`` (``Property``, ``Value``) VALUES ('ProductVersion', '3.7.0')"
                 )) {
                     $view = $database.OpenView([string]$query)
-                    try { $view.Execute() }
+                    try { [void]$view.Execute() }
                     finally { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($view) }
                 }
-                $database.Commit()
+                [void]$database.Commit()
             }
             finally {
                 if ($database) { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($database) }

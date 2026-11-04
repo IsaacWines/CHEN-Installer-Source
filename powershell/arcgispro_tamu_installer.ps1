@@ -27,7 +27,7 @@ function Get-ChenMsiProperty {
         $database = $installer.OpenDatabase([string]$Path, [int]0)
         $query = "SELECT ``Value`` FROM ``Property`` WHERE ``Property`` = '$Property'"
         $view = $database.OpenView([string]$query)
-        $view.Execute()
+        [void]$view.Execute()
         $record = $view.Fetch()
         if (-not $record) { throw "MSI property $Property is missing." }
         return $record.StringData([int]1)
