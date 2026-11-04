@@ -4,22 +4,27 @@ Public script/config source for the CHEN Installer Tool.
 
 This repository contains installer configuration files and PowerShell scripts used by the CHEN Installer GUI. The GUI reads installer metadata, downloads or runs the appropriate script, and reports progress through a simple progress-output format.
 
+## Quick Start
+
+1. Open the [CHEN Installer Tool](https://github.com/IsaacWines/CHEN-Installers) on Windows and click **Refresh**.
+2. Select the installer you want, then click **Install**.
+3. For **Craft App Suite + Optional Launcher**, choose individual apps and check **Also install ArtCraft Launcher (optional)** if you want the central app hub.
+4. Choose the Craft app install scope and click **Install selected**. Follow progress in the CHEN log.
+5. Open installed apps or **ArtCraft Launcher** from the Start menu in your normal desktop session.
+
+The GUI reads [installers.json](installers.json) from this repository's `main` branch and downloads the selected script. The Craft installer is available through Refresh without rebuilding the GUI. Requirements vary by installer; see the sections below.
+
 ## Repository Structure
 
-```text
-CHEN-Installer-Source/
-├── installers.json
-├── powershell/
-│   ├── common.ps1
-│   ├── fiji_installer.ps1
-│   ├── fiji_uninstaller.ps1
-│   ├── git_installer.ps1
-│   ├── matlab_installer.ps1
-│   ├── python_manager.ps1
-│   └── COMSOL/
-│       └── COMSOL_installer.ps1
-└── batch/
-```
+| Path | Contents |
+| --- | --- |
+| [installers.json](installers.json) | Installer names, script paths, arguments and availability in the GUI. |
+| [powershell/](powershell/) | Installer scripts and shared helpers, including the self-contained Craft installer. |
+| [powershell/COMSOL/](powershell/COMSOL/) | COMSOL installer and setup configuration. |
+| [powershell/COMSOL64/](powershell/COMSOL64/) | Additional COMSOL installer and setup configuration. |
+| [docs/craftsuite-installer.md](docs/craftsuite-installer.md) | Detailed Craft app setup, scopes, logging and Windows acceptance checks. |
+| [tests/craftsuite.tests.ps1](tests/craftsuite.tests.ps1) | Dependency-free Craft installer tests; no apps are installed. |
+| [.github/workflows/craftsuite-tests.yml](.github/workflows/craftsuite-tests.yml) | Windows PowerShell 5.1 and PowerShell 7 CI checks. |
 
 ## Installer Metadata
 
@@ -33,54 +38,108 @@ The root `installers.json` file controls which installers appear in the CHEN Ins
 | `arguments` | Optional command-line arguments passed to the script. |
 | `enabled` | Whether the installer should appear in the GUI. |
 
-Current installer entries:
+Current enabled installer entries:
+
+| Installer | Script |
+| --- | --- |
+| MATLAB Installer | [powershell/matlab_installer.ps1](powershell/matlab_installer.ps1) |
+| FIJI Installer | [powershell/fiji_installer.ps1](powershell/fiji_installer.ps1) |
+| FIJI Uninstaller | [powershell/fiji_uninstaller.ps1](powershell/fiji_uninstaller.ps1) |
+| COMSOL Un/Installer | [powershell/COMSOL/COMSOL_installer.ps1](powershell/COMSOL/COMSOL_installer.ps1) |
+| Python Version Manager | [powershell/python_manager.ps1](powershell/python_manager.ps1) |
+| Git Installer | [powershell/git_installer.ps1](powershell/git_installer.ps1) |
+| Office 2024 PTB Installer | [powershell/office2024_ptb_installer.ps1](powershell/office2024_ptb_installer.ps1) |
+| PDFgear Installer | [powershell/pdfgear_installer.ps1](powershell/pdfgear_installer.ps1) |
+| Craft App Suite + Optional Launcher | [powershell/craftsuite_installer.ps1](powershell/craftsuite_installer.ps1) |
+
+Example metadata entry:
 
 ```json
-[
-  {
-    "name": "MATLAB Installer",
-    "scriptType": "powershell",
-    "scriptPath": "powershell/matlab_installer.ps1",
-    "arguments": "",
-    "enabled": true
-  },
-  {
-    "name": "FIJI Installer",
-    "scriptType": "powershell",
-    "scriptPath": "powershell/fiji_installer.ps1",
-    "arguments": "",
-    "enabled": true
-  },
-  {
-    "name": "FIJI Uninstaller",
-    "scriptType": "powershell",
-    "scriptPath": "powershell/fiji_uninstaller.ps1",
-    "arguments": "",
-    "enabled": true
-  },
-  {
-    "name": "COMSOL Un/Installer",
-    "scriptType": "powershell",
-    "scriptPath": "powershell/COMSOL/COMSOL_installer.ps1",
-    "arguments": "",
-    "enabled": true
-  },
-  {
-    "name": "Python Version Manager",
-    "scriptType": "powershell",
-    "scriptPath": "powershell/python_manager.ps1",
-    "arguments": "",
-    "enabled": true
-  },
-  {
-    "name": "Git Installer",
-    "scriptType": "powershell",
-    "scriptPath": "powershell/git_installer.ps1",
-    "arguments": "",
-    "enabled": true
-  }
-]
+{
+  "name": "Craft App Suite + Optional Launcher",
+  "scriptType": "powershell",
+  "scriptPath": "powershell/craftsuite_installer.ps1",
+  "arguments": "",
+  "enabled": true
+}
 ```
+
+## Craft App Suite and Optional Launcher
+
+[powershell/craftsuite_installer.ps1](powershell/craftsuite_installer.ps1) opens a checklist for the apps listed on [CraftSuite](https://craftsuite.net/). The **Also install ArtCraft Launcher (optional)** checkbox is separate from the app checklist and starts unchecked. Select all/Clear apps affect only the app checklist.
+
+| Selection | Result |
+| --- | --- |
+| Apps selected, launcher unchecked | Installs only the selected apps. |
+| Apps selected, launcher checked | Installs the selected apps and ArtCraft Launcher in the same run. |
+| No apps selected, launcher checked | Installs only ArtCraft Launcher. |
+
+The [official ArtCraft Launcher](https://github.com/storytold/craft-launcher) provides the central interface for discovering, opening, installing and updating Craft apps. After installation, open it from the Start menu to access your installed Craft apps.
+
+### Supported Apps
+
+| Category | Apps |
+| --- | --- |
+| Photo, video and publishing | PhotoCraft, VectorCraft, FilmCraft, LightCraft, PdfCraft, EffectCraft, DesignCraft |
+| Documents, spreadsheets and slides | WordCraft, GridCraft, DeckCraft |
+| Drafting, audio and interface design | CADCraft, SoundCraft, FigCraft |
+| Separate AI studio | ArtCraft AI Studio (Windows x64 only; opens separately; online AI services may require an account or payment) |
+| Optional central app hub | ArtCraft Launcher |
+
+### Requirements and Install Scope
+
+- Windows 10/11 with Windows PowerShell 5.1 or newer and access to GitHub release downloads. Chocolatey is not required for this installer.
+- Native x64, ARM64 and x86 MSI selection for the Craft apps and launcher. AI Studio is offered only on x64.
+- **This account** is the default Craft app scope. **Everyone on this PC** requires running CHEN or PowerShell as Administrator. Updates must use the same scope as the existing installation.
+- **ArtCraft Launcher remains per-user**, even if the Craft apps are installed for everyone. It installs for the account running the tool. If you use a different administrator's credentials to elevate CHEN, install the launcher separately from the intended user's session.
+- ArtCraft AI Studio retains its own MSI's default installation scope.
+
+### Standalone and Command-Line Use
+
+From the repository root, open the selection dialog:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\powershell\craftsuite_installer.ps1
+```
+
+Install selected apps with the launcher, without the selection dialog:
+
+```powershell
+.\powershell\craftsuite_installer.ps1 -NoUI -Apps 'photocraft,wordcraft,pdfcraft' -Launcher Include
+```
+
+Use `-Launcher Omit` for apps only. For the launcher alone:
+
+```powershell
+.\powershell\craftsuite_installer.ps1 -NoUI -Launcher Include
+```
+
+Preview current versions, packages, download URLs, checksums and scopes without downloading MSIs or installing anything:
+
+```powershell
+.\powershell\craftsuite_installer.ps1 -NoUI -Apps 'photocraft,wordcraft' -Launcher Include -PlanOnly
+```
+
+`-NoUI` requires an explicit `-Launcher Include` or `-Launcher Omit`. Use `-ListApps` for valid app IDs, or `-InstallScope AllUsers` for an Everyone install from an elevated session.
+
+### Verification and Logs
+
+All packages come directly from the official `storytold` GitHub releases. The script resolves the complete selection before installation and verifies every downloaded MSI against a published SHA-256 digest. Packages install sequentially with Windows Installer progress and per-app results.
+
+CHEN receives `CHEN_PROGRESS` updates. Per-run logs are saved under `CHEN_LOG_ROOT` when supplied by the GUI, or `%LOCALAPPDATA%\CHENInstaller\Logs` for standalone use. Each `CraftSuite_<run-id>` folder contains `plan.json`, `results.json` and per-app MSI logs. Failed packages are reported individually; cancelling a native MSI stops the remaining queue. Restart requirements are reported in the log.
+
+### Validation
+
+Run the dependency-free tests without installing apps:
+
+```powershell
+powershell.exe -NoProfile -File .\tests\craftsuite.tests.ps1
+pwsh -NoProfile -File .\tests\craftsuite.tests.ps1
+```
+
+CI checks both Windows PowerShell 5.1 and PowerShell 7. The tests use fixtures for network and MSI operations; a real Windows installation and launcher discovery still require a manual smoke test.
+
+See [CraftSuite installer instructions](docs/craftsuite-installer.md) for the complete app ID list, architecture options, error handling and Windows acceptance steps.
 
 ## Shared PowerShell Helpers
 
@@ -305,24 +364,6 @@ where pip
 ```
 
 5. Use `Remove Selected From PATH` or `Remove ALL Managed Python PATH Entries` if the default needs to be reset.
-
-## Craft App Suite and Optional Launcher
-
-The **Craft App Suite + Optional Launcher** entry opens a checklist for the apps
-listed on [CraftSuite](https://craftsuite.net/). An independent **Also install
-ArtCraft Launcher** checkbox offers a central place to open, install and update
-the Craft apps. It starts unchecked. You can install apps without the launcher,
-the launcher alone, or both in one run.
-
-This uses the [official ArtCraft Launcher](https://github.com/storytold/craft-launcher),
-including its native app discovery, launching and updates. It does not introduce
-a separate CHEN launcher to maintain. The existing CHEN Windows GUI reads
-`installers.json` and downloads this self-contained script, so **no changes or
-rebuild are needed in CHEN-Installers**. After this catalog entry is merged into
-`main`, click Refresh in the existing tool and select the new entry.
-
-See [CraftSuite installer instructions](docs/craftsuite-installer.md) for supported
-apps, command-line examples, install scopes, logs and the Windows acceptance checks.
 
 ## Development Notes
 
