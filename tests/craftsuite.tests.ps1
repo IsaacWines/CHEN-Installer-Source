@@ -44,6 +44,12 @@ function New-FixtureRelease {
 }
 $photo = Get-CraftCatalog | Where-Object Id -eq 'photocraft'
 
+Test-Case 'CHEN catalog exposes exactly one enabled self-contained installer entry' {
+    # Windows PowerShell 5.1 emits ConvertFrom-Json arrays as one pipeline object.
+    $catalog = Get-Content -LiteralPath (Join-Path $PSScriptRoot '../installers.json') -Raw | ConvertFrom-Json
+    $entry = @($catalog | Where-Object scriptPath -eq 'powershell/craftsuite_installer.ps1')
+    Assert-True ($entry.Count -eq 1 -and $entry[0].enabled -and $entry[0].scriptType -eq 'powershell') 'Missing CraftSuite installer entry.'
+}
 Test-Case 'Catalog has 13 Craft apps, the separate studio and the optional launcher' {
     $catalog = @(Get-CraftCatalog)
     Assert-True ($catalog.Count -eq 15) 'Wrong catalog count.'

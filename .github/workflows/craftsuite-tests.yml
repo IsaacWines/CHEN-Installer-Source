@@ -19,8 +19,6 @@ jobs:
           [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path 'powershell/craftsuite_installer.ps1'), [ref]$tokens, [ref]$parseErrors)
           if ($parseErrors.Count) { throw ($parseErrors | Out-String) }
           & ./tests/craftsuite.tests.ps1
-          $entry = @(Get-Content installers.json -Raw | ConvertFrom-Json | Where-Object scriptPath -eq 'powershell/craftsuite_installer.ps1')
-          if ($entry.Count -ne 1 -or -not $entry[0].enabled) { throw 'Missing CraftSuite installer entry.' }
       - name: PowerShell 7 tests
         shell: pwsh
         run: ./tests/craftsuite.tests.ps1
