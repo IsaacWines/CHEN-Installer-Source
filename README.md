@@ -51,6 +51,9 @@ Current enabled installer entries:
 | Office 2024 PTB Installer | [powershell/office2024_ptb_installer.ps1](powershell/office2024_ptb_installer.ps1) |
 | PDFgear Installer | [powershell/pdfgear_installer.ps1](powershell/pdfgear_installer.ps1) |
 | Craft App Suite + Optional Launcher | [powershell/craftsuite_installer.ps1](powershell/craftsuite_installer.ps1) |
+| ArcGIS Pro Installer (TAMU) | [powershell/arcgispro_tamu_installer.ps1](powershell/arcgispro_tamu_installer.ps1) |
+| Steam Installer | [powershell/steam_installer.ps1](powershell/steam_installer.ps1) |
+| System Control Tools (ParkControl + HWiNFO) | [powershell/system_control_installer.ps1](powershell/system_control_installer.ps1) |
 
 Example metadata entry:
 
@@ -140,6 +143,53 @@ pwsh -NoProfile -File .\tests\craftsuite.tests.ps1
 CI checks both Windows PowerShell 5.1 and PowerShell 7. The tests use fixtures for network and MSI operations; a real Windows installation and launcher discovery still require a manual smoke test.
 
 See [CraftSuite installer instructions](docs/craftsuite-installer.md) for the complete app ID list, architecture options, error handling and Windows acceptance steps.
+
+## ArcGIS Pro for TAMU
+
+**ArcGIS Pro Installer (TAMU)** installs an authorized, extracted `ArcGISPro.msi`, installs/checks its Microsoft prerequisites, and configures `https://tamu.maps.arcgis.com` for Named User licensing. The selector links to TAMU Software and the TAMU ArcGIS portal. Obtain the installer there, run the downloaded EXE to extract it, uncheck **Launch the setup program**, then select the extracted MSI while keeping its companion files beside it.
+
+The script validates the MSI's Esri signature, product and version. ArcGIS Pro 3.3–3.6 use the x64 .NET 8 Desktop Runtime; 3.7 uses x64 .NET 10. WebView2 is installed/updated at machine scope. Unsupported releases stop before installation instead of guessing the runtime. Existing installations must retain their installation scope.
+
+```powershell
+.\powershell\arcgispro_tamu_installer.ps1 -NoUI -InstallerPath 'D:\ArcGISPro\ArcGISPro.msi' -InstallScope AllUsers -AcceptEula
+```
+
+Run as Administrator for Everyone installs. Use `-PlanOnly` to inspect the validated package and prerequisites without installing. After installation, open ArcGIS Pro as your normal user and choose **Texas A&M NetID Login**. Your account must already have the required ArcGIS Pro license; installation does not assign Advanced/ArcInfo or extensions. Downloads and sign-in stay in your browser/ArcGIS Pro, and credentials are never embedded in scripts.
+
+## Steam
+
+**Steam Installer** installs or updates the Steam client using the exact `Valve.Steam` package from the WinGet community source. It does not uninstall Steam, remove libraries, or download games. Open Steam from Start and sign in afterward; the client manages its own updates.
+
+```powershell
+.\powershell\steam_installer.ps1
+```
+
+## System Control Tools for the Spectre
+
+**System Control Tools (ParkControl + HWiNFO)** offers a checklist for two focused utilities:
+
+| Tool | Purpose | Limitation |
+| --- | --- | --- |
+| ParkControl | Windows power-plan and CPU power-setting controls. | Does not provide HP firmware thermal profiles or guaranteed fan control. |
+| HWiNFO | CPU/GPU temperatures, sensor readings, clocks and throttling monitoring. | Free edition is for non-commercial use; organizational use requires appropriate licensing. |
+
+This is the practical power/monitoring setup for the Intel x64 Spectre 15-eb0xxx. A full third-party replacement for that model's HP Command Center fan/thermal controls has not been verified. Fan Control's own FAQ says laptop fan support is generally unavailable without a compatible plugin; OmenMon targets compatible HP Omen firmware. The installer does not install an unverified fan profile, remove HP software, apply tuning presets, or configure new automatic startup tasks.
+
+```powershell
+.\powershell\system_control_installer.ps1
+.\powershell\system_control_installer.ps1 -NoUI -Tools ParkControl
+.\powershell\system_control_installer.ps1 -NoUI -Tools HWiNFO
+```
+
+The current system-tools catalog targets native x64 Windows. Choose your power settings in ParkControl and **Sensors-only** in HWiNFO after installation. Firmware remains responsible for cooling; HP-specific thermal profile switching still needs a verified compatible utility such as HP Command Center.
+
+### Package Manager and Logs
+
+These three installers require Microsoft App Installer/WinGet for the logged-in Windows account. If `winget.exe` is unavailable, install/update App Installer and restart CHEN. They do not bootstrap a package manager, use the SYSTEM account, or bypass hash/source checks. Package installation follows the publisher's supported scope and license terms; no paid license is purchased.
+
+Steam and system-tool installs save WinGet logs and `results.json` under `CHEN_LOG_ROOT` or `%LOCALAPPDATA%\CHENInstaller\Logs`. ArcGIS saves its resolved plan, prerequisite results and native MSI log there too. Already-current packages count as success. Restart requirements are reported; ArcGIS pauses before its MSI if a prerequisite requires restarting Windows.
+
+See [ArcGIS, Steam and system tools instructions](docs/desktop-installers.md) for prerequisites, troubleshooting, source references and Windows acceptance checks.
 
 ## Shared PowerShell Helpers
 

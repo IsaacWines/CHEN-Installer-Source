@@ -1,0 +1,20 @@
+name: Desktop installer checks
+on:
+  push:
+    paths: ['powershell/common.ps1', 'powershell/arcgispro_tamu_installer.ps1', 'powershell/steam_installer.ps1', 'powershell/system_control_installer.ps1', 'tests/desktop-installers.tests.ps1', 'installers.json', '.github/workflows/desktop-installers-tests.yml']
+  pull_request:
+    paths: ['powershell/common.ps1', 'powershell/arcgispro_tamu_installer.ps1', 'powershell/steam_installer.ps1', 'powershell/system_control_installer.ps1', 'tests/desktop-installers.tests.ps1', 'installers.json', '.github/workflows/desktop-installers-tests.yml']
+permissions:
+  contents: read
+jobs:
+  powershell:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Windows PowerShell 5.1 checks
+        shell: powershell
+        run: ./tests/desktop-installers.tests.ps1
+      - name: PowerShell 7 checks
+        shell: pwsh
+        run: ./tests/desktop-installers.tests.ps1

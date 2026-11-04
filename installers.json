@@ -61,5 +61,26 @@
     "scriptPath": "powershell/craftsuite_installer.ps1",
     "arguments": "",
     "enabled": true
+  },
+  {
+    "name": "ArcGIS Pro Installer (TAMU)",
+    "scriptType": "powershell",
+    "scriptPath": "powershell/arcgispro_tamu_installer.ps1",
+    "arguments": "",
+    "enabled": true
+  },
+  {
+    "name": "Steam Installer",
+    "scriptType": "powershell",
+    "scriptPath": "powershell/steam_installer.ps1",
+    "arguments": "",
+    "enabled": true
+  },
+  {
+    "name": "System Control Tools (ParkControl + HWiNFO)",
+    "scriptType": "powershell",
+    "scriptPath": "powershell/system_control_installer.ps1",
+    "arguments": "",
+    "enabled": true
   }
 ]
