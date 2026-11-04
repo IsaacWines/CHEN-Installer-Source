@@ -54,5 +54,12 @@
     "scriptPath": "powershell/pdfgear_installer.ps1",
     "arguments": "",
     "enabled": true
+  },
+  {
+    "name": "Craft App Suite + Optional Launcher",
+    "scriptType": "powershell",
+    "scriptPath": "powershell/craftsuite_installer.ps1",
+    "arguments": "",
+    "enabled": true
   }
 ]
